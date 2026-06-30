@@ -242,6 +242,14 @@ select:focus {
   gap: 0.45rem;
 }
 
+.room-card.clickable {
+  cursor: grab;
+}
+
+.room-card.clickable:active {
+  cursor: grabbing;
+}
+
 .room-card.dragging {
   opacity: 0.78;
 }
@@ -263,6 +271,7 @@ select:focus {
 .campaign-drag {
   width: 1.8rem;
   height: 1.8rem;
+  pointer-events: none;
 }
 
 .room-card svg {

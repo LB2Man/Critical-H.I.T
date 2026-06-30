@@ -24,6 +24,7 @@ import {
   arrayUnion,
   collection,
   deleteDoc,
+  deleteField,
   doc,
   getDocs,
   onSnapshot,
@@ -292,6 +293,25 @@ export default function Home() {
     });
   }
 
+  async function leaveCampaign(roomId: string) {
+    if (!user?.email) return;
+    await updateDoc(doc(db, "rooms", roomId), {
+      invitedEmails: arrayRemove(user.email),
+      updatedAt: serverTimestamp(),
+    });
+
+    const nextOrder = campaignOrder.filter((id) => id !== roomId);
+    setCampaignOrder(nextOrder);
+    await setDoc(
+      doc(db, "users", user.uid),
+      {
+        campaignOrder: nextOrder,
+        updatedAt: serverTimestamp(),
+      },
+      { merge: true },
+    );
+  }
+
   if (!firebaseReady) {
     return <MissingFirebaseConfig />;
   }
@@ -330,6 +350,7 @@ export default function Home() {
           }}
           onAcceptInvite={acceptCampaignInvite}
           onDeclineInvite={declineCampaignInvite}
+          onLeaveCampaign={leaveCampaign}
           onReorderCampaigns={reorderCampaigns}
           onDeleteCampaign={deleteCampaign}
         />
@@ -346,6 +367,7 @@ export default function Home() {
           }}
           onAcceptInvite={acceptCampaignInvite}
           onDeclineInvite={declineCampaignInvite}
+          onLeaveCampaign={leaveCampaign}
           onReorderCampaigns={reorderCampaigns}
           onDeleteCampaign={deleteCampaign}
         />
@@ -398,6 +420,7 @@ function RoomsView({
   onOpenRoom,
   onAcceptInvite,
   onDeclineInvite,
+  onLeaveCampaign,
   onReorderCampaigns,
   onDeleteCampaign,
 }: {
@@ -407,12 +430,16 @@ function RoomsView({
   onOpenRoom: (roomId: string) => void;
   onAcceptInvite: (roomId: string) => void;
   onDeclineInvite: (roomId: string) => void;
+  onLeaveCampaign: (roomId: string) => void;
   onReorderCampaigns: (roomIds: string[]) => void;
   onDeleteCampaign: (roomId: string) => void;
 }) {
-  const [campaignToDelete, setCampaignToDelete] = useState<Room | null>(null);
+  const [campaignAction, setCampaignAction] = useState<{
+    room: Room;
+    type: "delete" | "leave";
+  } | null>(null);
   const sensors = useSensors(
-    useSensor(PointerSensor),
+    useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
   );
 
@@ -452,7 +479,7 @@ function RoomsView({
                 onOpenRoom={onOpenRoom}
                 onAcceptInvite={onAcceptInvite}
                 onDeclineInvite={onDeclineInvite}
-                onRequestDelete={setCampaignToDelete}
+                onRequestAction={setCampaignAction}
               />
             ))}
             {rooms.length === 0 && (
@@ -462,23 +489,33 @@ function RoomsView({
         </SortableContext>
       </DndContext>
 
-      {campaignToDelete && (
+      {campaignAction && (
         <div className="modal-backdrop" role="presentation">
           <div className="confirm-modal" role="dialog" aria-modal="true" aria-labelledby="delete-campaign-title">
-            <h2 id="delete-campaign-title">Delete campaign?</h2>
-            <p>This will remove {campaignToDelete.name} and its combatants.</p>
+            <h2 id="delete-campaign-title">
+              {campaignAction.type === "delete" ? "Delete campaign?" : "Leave campaign?"}
+            </h2>
+            <p>
+              {campaignAction.type === "delete"
+                ? `This will remove ${campaignAction.room.name} and its combatants.`
+                : `This will remove ${campaignAction.room.name} from your campaign list.`}
+            </p>
             <div className="confirm-actions">
-              <button className="subtle-button" onClick={() => setCampaignToDelete(null)}>
+              <button className="subtle-button" onClick={() => setCampaignAction(null)}>
                 Cancel
               </button>
               <button
                 className="tool-button danger"
                 onClick={() => {
-                  onDeleteCampaign(campaignToDelete.id);
-                  setCampaignToDelete(null);
+                  if (campaignAction.type === "delete") {
+                    onDeleteCampaign(campaignAction.room.id);
+                  } else {
+                    onLeaveCampaign(campaignAction.room.id);
+                  }
+                  setCampaignAction(null);
                 }}
               >
-                Delete
+                {campaignAction.type === "delete" ? "Delete" : "Leave"}
               </button>
             </div>
           </div>
@@ -494,37 +531,67 @@ function CampaignCard({
   onOpenRoom,
   onAcceptInvite,
   onDeclineInvite,
-  onRequestDelete,
+  onRequestAction,
 }: {
   room: Room;
   user: User;
   onOpenRoom: (roomId: string) => void;
   onAcceptInvite: (roomId: string) => void;
   onDeclineInvite: (roomId: string) => void;
-  onRequestDelete: (room: Room) => void;
+  onRequestAction: (action: { room: Room; type: "delete" | "leave" }) => void;
 }) {
   const isPending = Boolean(user.email && room.pendingInvitedEmails?.includes(user.email));
   const isCreator = room.creatorUid === user.uid;
+  const isAcceptedInvitee = Boolean(user.email && room.invitedEmails.includes(user.email) && !isCreator);
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: room.id,
   });
+  const canOpen = !isPending;
+  const handleTrashClick = (event: React.MouseEvent<HTMLButtonElement>) => {
+    event.stopPropagation();
+    if (isCreator) {
+      onRequestAction({ room, type: "delete" });
+    } else if (isAcceptedInvitee) {
+      onRequestAction({ room, type: "leave" });
+    }
+  };
+  const stopCardGesture = (event: React.SyntheticEvent) => {
+    event.stopPropagation();
+  };
 
   return (
     <div
       ref={setNodeRef}
-      className={`room-card${isDragging ? " dragging" : ""}`}
+      className={`room-card${isDragging ? " dragging" : ""}${canOpen ? " clickable" : ""}`}
       style={{
         transform: CSS.Transform.toString(transform),
         transition,
       }}
+      onClick={() => {
+        if (canOpen) onOpenRoom(room.id);
+      }}
+      onKeyDown={(event) => {
+        if (canOpen && (event.key === "Enter" || event.key === " ")) {
+          event.preventDefault();
+          onOpenRoom(room.id);
+        }
+      }}
+      {...attributes}
+      {...listeners}
     >
       <div className="campaign-card-top">
-        <button className="drag-handle campaign-drag" {...attributes} {...listeners} title="Drag campaign">
+        <div className="drag-handle campaign-drag" title="Drag campaign">
           <GripVertical aria-hidden="true" />
-        </button>
+        </div>
         <Users aria-hidden="true" />
-        {isCreator && (
-          <button className="icon-button danger" title="Delete campaign" onClick={() => onRequestDelete(room)}>
+        {(isCreator || isAcceptedInvitee) && (
+          <button
+            className="icon-button danger"
+            title={isCreator ? "Delete campaign" : "Leave campaign"}
+            onPointerDown={stopCardGesture}
+            onKeyDown={stopCardGesture}
+            onClick={handleTrashClick}
+          >
             <Trash2 aria-hidden="true" />
           </button>
         )}
@@ -533,18 +600,30 @@ function CampaignCard({
       <small>{isCreator ? "Creator" : isPending ? "Pending invite" : "Invited"}</small>
       {isPending ? (
         <div className="campaign-invite-actions">
-          <button className="tool-button" onClick={() => onAcceptInvite(room.id)}>
+          <button
+            className="tool-button"
+            onPointerDown={stopCardGesture}
+            onKeyDown={stopCardGesture}
+            onClick={(event) => {
+              event.stopPropagation();
+              onAcceptInvite(room.id);
+            }}
+          >
             Accept
           </button>
-          <button className="tool-button danger" onClick={() => onDeclineInvite(room.id)}>
+          <button
+            className="tool-button danger"
+            onPointerDown={stopCardGesture}
+            onKeyDown={stopCardGesture}
+            onClick={(event) => {
+              event.stopPropagation();
+              onDeclineInvite(room.id);
+            }}
+          >
             Decline
           </button>
         </div>
-      ) : (
-        <button className="tool-button" onClick={() => onOpenRoom(room.id)}>
-          Open
-        </button>
-      )}
+      ) : null}
     </div>
   );
 }
@@ -873,6 +952,7 @@ function RoomView({ room, user, onBack }: { room: Room; user: User; onBack: () =
                       canManage={isCreator || combatant.ownerUid === user.uid}
                       canEdit={isCreator || combatant.ownerUid === user.uid}
                       canDrag={isCreator}
+                      currentUserId={user.uid}
                       hideHp={!isCreator && room.hideHpFromInvitees}
                       hideAc={!isCreator && room.hideAcFromInvitees}
                       onUpdate={(patch) => updateCombatant(combatant.id, patch)}
@@ -897,6 +977,7 @@ function CombatantRow({
   canManage,
   canEdit,
   canDrag,
+  currentUserId,
   hideHp,
   hideAc,
   onUpdate,
@@ -908,6 +989,7 @@ function CombatantRow({
   canManage: boolean;
   canEdit: boolean;
   canDrag: boolean;
+  currentUserId: string;
   hideHp: boolean;
   hideAc: boolean;
   onUpdate: (patch: Partial<Combatant>) => void;
@@ -917,7 +999,7 @@ function CombatantRow({
   const [conditionName, setConditionName] = useState<Condition>("blinded");
   const [conditionRounds, setConditionRounds] = useState("");
   const [hpActionAmount, setHpActionAmount] = useState("");
-  const [concentrationSaveDc, setConcentrationSaveDc] = useState<number | null>(null);
+  const [fallbackPromptId, setFallbackPromptId] = useState<string | null>(null);
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: combatant.id,
     disabled: !canDrag,
@@ -929,6 +1011,27 @@ function CombatantRow({
   };
   const conditions = normalizeConditions(combatant.conditions);
   const exhaustionLevel = combatant.exhaustionLevel ?? 0;
+  const concentrationPrompt = combatant.concentrationPrompt ?? null;
+  const shouldShowConcentrationPrompt =
+    Boolean(concentrationPrompt) &&
+    (concentrationPrompt?.ownerUid === currentUserId || fallbackPromptId === concentrationPrompt?.id);
+
+  useEffect(() => {
+    if (
+      !concentrationPrompt ||
+      concentrationPrompt.ownerUid === currentUserId ||
+      concentrationPrompt.fallbackUid !== currentUserId
+    ) {
+      setFallbackPromptId(null);
+      return;
+    }
+
+    const timeout = window.setTimeout(() => {
+      setFallbackPromptId(concentrationPrompt.id);
+    }, 2500);
+
+    return () => window.clearTimeout(timeout);
+  }, [concentrationPrompt, currentUserId]);
 
   function addCondition(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -973,22 +1076,30 @@ function CombatantRow({
         ? Math.max(0, combatant.hp - amount)
         : Math.min(combatant.maxHp, combatant.hp + amount);
 
-    onUpdate({ hp: nextHp });
-    setHpActionAmount("");
+    const patch: Partial<Combatant> = { hp: nextHp };
 
     if (direction === "damage" && conditions.some((condition) => condition.name === "concentration")) {
-      setConcentrationSaveDc(Math.max(10, Math.floor(amount / 2)));
+      patch.concentrationPrompt = {
+        id: `${combatant.id}-${Date.now()}`,
+        dc: Math.max(10, Math.floor(amount / 2)),
+        ownerUid: combatant.ownerUid,
+        fallbackUid: currentUserId,
+      };
     }
+
+    onUpdate(patch);
+    setHpActionAmount("");
   }
 
   function resolveConcentrationSave(failed: boolean) {
     if (failed) {
       onUpdate({
         conditions: conditions.filter((condition) => condition.name !== "concentration"),
+        concentrationPrompt: null,
       });
+    } else {
+      onUpdate({ concentrationPrompt: null });
     }
-
-    setConcentrationSaveDc(null);
   }
 
   return (
@@ -1036,9 +1147,11 @@ function CombatantRow({
           {conditions.length === 0 && <span className="no-conditions">No conditions</span>}
         </div>
         <div className="add-condition-wrap">
-          <button className="add-condition" disabled={!canEdit} onClick={() => setAddingCondition(true)}>
-            + Add Condition
-          </button>
+          {canEdit && (
+            <button className="add-condition" onClick={() => setAddingCondition(true)}>
+              + Add Condition
+            </button>
+          )}
           {addingCondition && (
             <form className="condition-menu" onSubmit={addCondition}>
               <select
@@ -1074,38 +1187,42 @@ function CombatantRow({
         <label className="field-stack hp-field">
           <div className="hp-control">
             <div className="hp-cell">
-              <input
-                className="hp-action-amount"
-                type="number"
-                min="1"
-                value={hpActionAmount}
-                disabled={!canEdit}
-                onChange={(event) => setHpActionAmount(event.target.value)}
-                placeholder=""
-                aria-label="Damage or healing amount"
-              />
-              <div className="hp-action-buttons">
-                <button
-                  className="mini-icon danger"
-                  type="button"
-                  disabled={!canEdit}
-                  onClick={() => applyHpDelta("damage")}
-                  title="Damage"
-                >
-                  <Sword aria-hidden="true" />
-                </button>
-                <button
-                  className="mini-icon heal"
-                  type="button"
-                  disabled={!canEdit}
-                  onClick={() => applyHpDelta("heal")}
-                  title="Heal"
-                >
-                  <HeartPulse aria-hidden="true" />
-                </button>
-              </div>
+              {canEdit && (
+                <>
+                  <input
+                    className="hp-action-amount"
+                    type="number"
+                    min="1"
+                    value={hpActionAmount}
+                    onChange={(event) => setHpActionAmount(event.target.value)}
+                    placeholder=""
+                    aria-label="Damage or healing amount"
+                  />
+                  <div className="hp-action-buttons">
+                    <button
+                      className="mini-icon danger"
+                      type="button"
+                      onClick={() => applyHpDelta("damage")}
+                      title="Damage"
+                    >
+                      <Sword aria-hidden="true" />
+                    </button>
+                    <button
+                      className="mini-icon heal"
+                      type="button"
+                      onClick={() => applyHpDelta("heal")}
+                      title="Heal"
+                    >
+                      <HeartPulse aria-hidden="true" />
+                    </button>
+                  </div>
+                </>
+              )}
               {hideHp ? (
-                <strong>{hiddenHpStatus(combatant.hp, combatant.maxHp)}</strong>
+                <label className="inline-stat-field">
+                  <span>HP</span>
+                  <strong>{hiddenHpStatus(combatant.hp, combatant.maxHp)}</strong>
+                </label>
               ) : (
                 <>
                   <label className="inline-stat-field">
@@ -1148,31 +1265,34 @@ function CombatantRow({
             />
           )}
         </label>
-        <label className="field-stack">
-          <span>Exh</span>
-          <select
-            value={exhaustionLevel}
-            disabled={!canEdit}
-            onChange={(event) => onUpdate({ exhaustionLevel: Number(event.target.value) })}
-            aria-label={`${combatant.name} exhaustion level`}
-          >
-            {[0, 1, 2, 3, 4, 5, 6].map((level) => (
-              <option key={level} value={level}>
-                {level}
-              </option>
-            ))}
-          </select>
-        </label>
+        {canEdit && (
+          <label className="field-stack">
+            <span>Exh</span>
+            <select
+              value={exhaustionLevel}
+              onChange={(event) => onUpdate({ exhaustionLevel: Number(event.target.value) })}
+              aria-label={`${combatant.name} exhaustion level`}
+            >
+              {[0, 1, 2, 3, 4, 5, 6].map((level) => (
+                <option key={level} value={level}>
+                  {level}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
       </div>
-      <button className="icon-button danger" disabled={!canManage} onClick={onRemove} title="Remove combatant">
-        <Trash2 aria-hidden="true" />
-      </button>
-      {concentrationSaveDc !== null && (
+      {canManage && (
+        <button className="icon-button danger" onClick={onRemove} title="Remove combatant">
+          <Trash2 aria-hidden="true" />
+        </button>
+      )}
+      {shouldShowConcentrationPrompt && concentrationPrompt && (
         <div className="modal-backdrop locked-modal" role="presentation">
           <div className="confirm-modal" role="dialog" aria-modal="true" aria-labelledby="concentration-save-title">
             <h2 id="concentration-save-title">Concentration Save</h2>
             <p>
-              DC <strong>{concentrationSaveDc}</strong>
+              DC <strong>{concentrationPrompt.dc}</strong>
             </p>
             <div className="confirm-actions">
               <button className="tool-button" onClick={() => resolveConcentrationSave(false)}>

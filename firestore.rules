@@ -32,16 +32,28 @@ service cloud.firestore {
         .hasOnly(['invitedEmails', 'pendingInvitedEmails', 'updatedAt']);
     }
 
+    function canRespondToInvite() {
+      return signedIn()
+        && inviteResponseOnly()
+        && (
+          userEmail() in resource.data.pendingInvitedEmails
+          || userEmail() in resource.data.invitedEmails
+        );
+    }
+
     function ownedCombatantEditOnly() {
       return request.resource.data.diff(resource.data).changedKeys()
-        .hasOnly(['initiative', 'name', 'hp', 'maxHp', 'ac', 'conditions', 'exhaustionLevel', 'updatedAt']);
+        .hasOnly(['initiative', 'name', 'hp', 'maxHp', 'ac', 'conditions', 'concentrationPrompt', 'exhaustionLevel', 'updatedAt']);
     }
 
     match /users/{userId} {
       allow read: if signedIn();
       allow create, update: if signedIn()
         && request.auth.uid == userId
-        && request.resource.data.email == userEmail();
+        && (
+          !('email' in request.resource.data)
+          || request.resource.data.email == userEmail()
+        );
     }
 
     match /rooms/{roomId} {
@@ -56,7 +68,7 @@ service cloud.firestore {
         && request.resource.data.invitedEmails is list
         && request.resource.data.pendingInvitedEmails is list
         && request.resource.data.round == 1;
-      allow update: if isRoomCreator(roomId) || (isPendingRoomInvite() && inviteResponseOnly());
+      allow update: if isRoomCreator(roomId) || canRespondToInvite();
       allow delete: if isRoomCreator(roomId);
 
       match /combatants/{combatantId} {

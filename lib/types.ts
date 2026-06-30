@@ -42,6 +42,12 @@ export type Combatant = {
   initiative: number;
   name: string;
   conditions: ActiveCondition[];
+  concentrationPrompt?: {
+    id: string;
+    dc: number;
+    ownerUid: string;
+    fallbackUid: string;
+  } | null;
   hp: number;
   maxHp: number;
   ac: number;
