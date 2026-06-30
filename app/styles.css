@@ -242,6 +242,29 @@ select:focus {
   gap: 0.45rem;
 }
 
+.room-card.dragging {
+  opacity: 0.78;
+}
+
+.campaign-card-top {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+}
+
+.campaign-card-top > svg {
+  color: var(--red-bright);
+}
+
+.campaign-card-top .icon-button {
+  margin-left: auto;
+}
+
+.campaign-drag {
+  width: 1.8rem;
+  height: 1.8rem;
+}
+
 .room-card svg {
   color: var(--red-bright);
 }
@@ -260,6 +283,47 @@ select:focus {
   display: flex;
   gap: 0.5rem;
   flex-wrap: wrap;
+}
+
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  display: grid;
+  place-items: center;
+  background: rgba(0, 0, 0, 0.68);
+  padding: 1rem;
+}
+
+.confirm-modal {
+  width: min(24rem, 100%);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #130d0d;
+  box-shadow: 0 1rem 3rem var(--shadow);
+  padding: 1rem;
+}
+
+.confirm-modal h2 {
+  margin: 0 0 0.5rem;
+  color: var(--gold);
+}
+
+.confirm-modal p {
+  margin: 0;
+  color: var(--muted);
+}
+
+.confirm-modal strong {
+  color: var(--gold);
+  font-size: 1.4rem;
+}
+
+.confirm-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.6rem;
+  margin-top: 1rem;
 }
 
 .room-header {
@@ -293,6 +357,10 @@ select:focus {
   border: 1px solid var(--line);
   border-radius: 8px;
   background: rgba(16, 11, 11, 0.86);
+}
+
+.tracker-toolbar > .tool-button:last-child {
+  margin-left: auto;
 }
 
 .initiative-table {

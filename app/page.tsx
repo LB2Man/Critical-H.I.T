@@ -25,6 +25,7 @@ import {
   collection,
   deleteDoc,
   doc,
+  getDocs,
   onSnapshot,
   orderBy,
   query,
@@ -37,6 +38,7 @@ import {
 import { onAuthStateChanged, signInWithPopup, signOut, User } from "firebase/auth";
 import {
   ChevronRight,
+  ChevronLeft,
   GripVertical,
   HeartPulse,
   LogOut,
@@ -69,6 +71,7 @@ export default function Home() {
   const [user, setUser] = useState<User | null>(null);
   const [authLoading, setAuthLoading] = useState(true);
   const [rooms, setRooms] = useState<Room[]>([]);
+  const [campaignOrder, setCampaignOrder] = useState<string[]>([]);
   const [activeRoomId, setActiveRoomId] = useState<string | null>(null);
   const [view, setView] = useState<View>("rooms");
 
@@ -99,6 +102,18 @@ export default function Home() {
   }, []);
 
   useEffect(() => {
+    if (!user || !firebaseReady) {
+      setCampaignOrder([]);
+      return;
+    }
+
+    return onSnapshot(doc(db, "users", user.uid), (snapshot) => {
+      const order = snapshot.data()?.campaignOrder;
+      setCampaignOrder(Array.isArray(order) ? order.filter((id): id is string => typeof id === "string") : []);
+    });
+  }, [user]);
+
+  useEffect(() => {
     if (!user?.email || !firebaseReady) {
       setRooms([]);
       return;
@@ -111,7 +126,7 @@ export default function Home() {
     const createdRooms = new Map<string, Room>();
     const invitedRooms = new Map<string, Room>();
     const pendingRooms = new Map<string, Room>();
-    const publish = () =>
+    const publish = () => {
       setRooms(
         Array.from(
           new Map([
@@ -121,6 +136,7 @@ export default function Home() {
           ]).values(),
         ).sort((a, b) => a.name.localeCompare(b.name)),
       );
+    };
 
     const unsubscribeCreated = onSnapshot(createdQuery, (snapshot) => {
       snapshot.docChanges().forEach((change) => {
@@ -167,6 +183,19 @@ export default function Home() {
     [activeRoomId, rooms],
   );
 
+  const orderedRooms = useMemo(() => {
+    const orderIndex = new Map(campaignOrder.map((roomId, index) => [roomId, index]));
+    return [...rooms].sort((a, b) => {
+      const aIndex = orderIndex.get(a.id);
+      const bIndex = orderIndex.get(b.id);
+
+      if (aIndex !== undefined && bIndex !== undefined) return aIndex - bIndex;
+      if (aIndex !== undefined) return -1;
+      if (bIndex !== undefined) return 1;
+      return a.name.localeCompare(b.name);
+    });
+  }, [campaignOrder, rooms]);
+
   async function handleSignIn() {
     if (!firebaseReady) return;
     await signInWithPopup(auth, googleProvider);
@@ -192,8 +221,58 @@ export default function Home() {
       updatedAt: serverTimestamp(),
     });
 
+    const nextOrder = [roomRef.id, ...campaignOrder.filter((roomId) => roomId !== roomRef.id)];
+    setCampaignOrder(nextOrder);
+    await setDoc(
+      doc(db, "users", user.uid),
+      {
+        campaignOrder: nextOrder,
+        updatedAt: serverTimestamp(),
+      },
+      { merge: true },
+    );
+
     setActiveRoomId(roomRef.id);
     setView("room");
+  }
+
+  async function reorderCampaigns(nextOrder: string[]) {
+    if (!user) return;
+    setCampaignOrder(nextOrder);
+    await setDoc(
+      doc(db, "users", user.uid),
+      {
+        campaignOrder: nextOrder,
+        updatedAt: serverTimestamp(),
+      },
+      { merge: true },
+    );
+  }
+
+  async function deleteCampaign(roomId: string) {
+    if (!user) return;
+
+    const combatants = await getDocs(collection(db, "rooms", roomId, "combatants"));
+    const batch = writeBatch(db);
+    combatants.docs.forEach((combatant) => batch.delete(combatant.ref));
+    batch.delete(doc(db, "rooms", roomId));
+    await batch.commit();
+
+    const nextOrder = campaignOrder.filter((id) => id !== roomId);
+    setCampaignOrder(nextOrder);
+    await setDoc(
+      doc(db, "users", user.uid),
+      {
+        campaignOrder: nextOrder,
+        updatedAt: serverTimestamp(),
+      },
+      { merge: true },
+    );
+
+    if (activeRoomId === roomId) {
+      setActiveRoomId(null);
+      setView("rooms");
+    }
   }
 
   async function acceptCampaignInvite(roomId: string) {
@@ -242,7 +321,7 @@ export default function Home() {
 
       {view === "rooms" ? (
         <RoomsView
-          rooms={rooms}
+          rooms={orderedRooms}
           user={user}
           onCreateRoom={handleCreateRoom}
           onOpenRoom={(roomId) => {
@@ -251,12 +330,14 @@ export default function Home() {
           }}
           onAcceptInvite={acceptCampaignInvite}
           onDeclineInvite={declineCampaignInvite}
+          onReorderCampaigns={reorderCampaigns}
+          onDeleteCampaign={deleteCampaign}
         />
       ) : activeRoom ? (
         <RoomView room={activeRoom} user={user} onBack={() => setView("rooms")} />
       ) : (
         <RoomsView
-          rooms={rooms}
+          rooms={orderedRooms}
           user={user}
           onCreateRoom={handleCreateRoom}
           onOpenRoom={(roomId) => {
@@ -265,6 +346,8 @@ export default function Home() {
           }}
           onAcceptInvite={acceptCampaignInvite}
           onDeclineInvite={declineCampaignInvite}
+          onReorderCampaigns={reorderCampaigns}
+          onDeleteCampaign={deleteCampaign}
         />
       )}
     </main>
@@ -315,6 +398,8 @@ function RoomsView({
   onOpenRoom,
   onAcceptInvite,
   onDeclineInvite,
+  onReorderCampaigns,
+  onDeleteCampaign,
 }: {
   rooms: Room[];
   user: User;
@@ -322,7 +407,26 @@ function RoomsView({
   onOpenRoom: (roomId: string) => void;
   onAcceptInvite: (roomId: string) => void;
   onDeclineInvite: (roomId: string) => void;
+  onReorderCampaigns: (roomIds: string[]) => void;
+  onDeleteCampaign: (roomId: string) => void;
 }) {
+  const [campaignToDelete, setCampaignToDelete] = useState<Room | null>(null);
+  const sensors = useSensors(
+    useSensor(PointerSensor),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
+  );
+
+  function handleCampaignDragEnd(event: DragEndEvent) {
+    const { active, over } = event;
+    if (!over || active.id === over.id) return;
+
+    const oldIndex = rooms.findIndex((room) => room.id === active.id);
+    const newIndex = rooms.findIndex((room) => room.id === over.id);
+    if (oldIndex < 0 || newIndex < 0) return;
+
+    onReorderCampaigns(arrayMove(rooms, oldIndex, newIndex).map((room) => room.id));
+  }
+
   return (
     <section className="room-list-page">
       <div className="page-heading">
@@ -337,38 +441,111 @@ function RoomsView({
         </button>
       </form>
 
-      <div className="rooms-grid">
-        {rooms.map((room) => {
-          const isPending = Boolean(user.email && room.pendingInvitedEmails?.includes(user.email));
-          const isCreator = room.creatorUid === user.uid;
+      <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleCampaignDragEnd}>
+        <SortableContext items={rooms.map((room) => room.id)} strategy={verticalListSortingStrategy}>
+          <div className="rooms-grid">
+            {rooms.map((room) => (
+              <CampaignCard
+                key={room.id}
+                room={room}
+                user={user}
+                onOpenRoom={onOpenRoom}
+                onAcceptInvite={onAcceptInvite}
+                onDeclineInvite={onDeclineInvite}
+                onRequestDelete={setCampaignToDelete}
+              />
+            ))}
+            {rooms.length === 0 && (
+              <div className="empty-state">Create your first campaign to start tracking combat.</div>
+            )}
+          </div>
+        </SortableContext>
+      </DndContext>
 
-          return (
-            <div className="room-card" key={room.id}>
-              <Users aria-hidden="true" />
-              <span>{room.name}</span>
-              <small>{isCreator ? "Creator" : isPending ? "Pending invite" : "Invited"}</small>
-              {isPending ? (
-                <div className="campaign-invite-actions">
-                  <button className="tool-button" onClick={() => onAcceptInvite(room.id)}>
-                    Accept
-                  </button>
-                  <button className="tool-button danger" onClick={() => onDeclineInvite(room.id)}>
-                    Decline
-                  </button>
-                </div>
-              ) : (
-                <button className="tool-button" onClick={() => onOpenRoom(room.id)}>
-                  Open
-                </button>
-              )}
+      {campaignToDelete && (
+        <div className="modal-backdrop" role="presentation">
+          <div className="confirm-modal" role="dialog" aria-modal="true" aria-labelledby="delete-campaign-title">
+            <h2 id="delete-campaign-title">Delete campaign?</h2>
+            <p>This will remove {campaignToDelete.name} and its combatants.</p>
+            <div className="confirm-actions">
+              <button className="subtle-button" onClick={() => setCampaignToDelete(null)}>
+                Cancel
+              </button>
+              <button
+                className="tool-button danger"
+                onClick={() => {
+                  onDeleteCampaign(campaignToDelete.id);
+                  setCampaignToDelete(null);
+                }}
+              >
+                Delete
+              </button>
             </div>
-          );
-        })}
-        {rooms.length === 0 && (
-          <div className="empty-state">Create your first campaign to start tracking combat.</div>
+          </div>
+        </div>
+      )}
+    </section>
+  );
+}
+
+function CampaignCard({
+  room,
+  user,
+  onOpenRoom,
+  onAcceptInvite,
+  onDeclineInvite,
+  onRequestDelete,
+}: {
+  room: Room;
+  user: User;
+  onOpenRoom: (roomId: string) => void;
+  onAcceptInvite: (roomId: string) => void;
+  onDeclineInvite: (roomId: string) => void;
+  onRequestDelete: (room: Room) => void;
+}) {
+  const isPending = Boolean(user.email && room.pendingInvitedEmails?.includes(user.email));
+  const isCreator = room.creatorUid === user.uid;
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
+    id: room.id,
+  });
+
+  return (
+    <div
+      ref={setNodeRef}
+      className={`room-card${isDragging ? " dragging" : ""}`}
+      style={{
+        transform: CSS.Transform.toString(transform),
+        transition,
+      }}
+    >
+      <div className="campaign-card-top">
+        <button className="drag-handle campaign-drag" {...attributes} {...listeners} title="Drag campaign">
+          <GripVertical aria-hidden="true" />
+        </button>
+        <Users aria-hidden="true" />
+        {isCreator && (
+          <button className="icon-button danger" title="Delete campaign" onClick={() => onRequestDelete(room)}>
+            <Trash2 aria-hidden="true" />
+          </button>
         )}
       </div>
-    </section>
+      <span>{room.name}</span>
+      <small>{isCreator ? "Creator" : isPending ? "Pending invite" : "Invited"}</small>
+      {isPending ? (
+        <div className="campaign-invite-actions">
+          <button className="tool-button" onClick={() => onAcceptInvite(room.id)}>
+            Accept
+          </button>
+          <button className="tool-button danger" onClick={() => onDeclineInvite(room.id)}>
+            Decline
+          </button>
+        </div>
+      ) : (
+        <button className="tool-button" onClick={() => onOpenRoom(room.id)}>
+          Open
+        </button>
+      )}
+    </div>
   );
 }
 
@@ -447,7 +624,8 @@ function RoomView({ room, user, onBack }: { room: Room; user: User; onBack: () =
   }
 
   async function removeCombatant(id: string) {
-    if (!isCreator) return;
+    const combatant = combatants.find((item) => item.id === id);
+    if (!isCreator && combatant?.ownerUid !== user.uid) return;
     await deleteDoc(doc(db, "rooms", room.id, "combatants", id));
 
     if (room.activeCombatantId === id) {
@@ -509,6 +687,25 @@ function RoomView({ room, user, onBack }: { room: Room; user: User; onBack: () =
     }
 
     await batch.commit();
+  }
+
+  async function handleBack() {
+    if (!isCreator || combatants.length === 0) return;
+    const currentIndex = Math.max(
+      combatants.findIndex((combatant) => combatant.id === room.activeCombatantId),
+      0,
+    );
+    const previousIndex = currentIndex - 1;
+    const isPreviousRound = previousIndex < 0;
+    if (isPreviousRound && room.round <= 1) return;
+
+    const previousCombatant = isPreviousRound ? combatants[combatants.length - 1] : combatants[previousIndex];
+
+    await updateDoc(doc(db, "rooms", room.id), {
+      activeCombatantId: previousCombatant.id,
+      round: isPreviousRound ? Math.max(1, room.round - 1) : room.round,
+      updatedAt: serverTimestamp(),
+    });
   }
 
   async function resetRound() {
@@ -623,6 +820,10 @@ function RoomView({ room, user, onBack }: { room: Room; user: User; onBack: () =
       ) : (
         <div className="initiative-tab">
           <div className="tracker-toolbar">
+            <button className="primary-action" onClick={handleBack} disabled={!isCreator}>
+              <ChevronLeft aria-hidden="true" />
+              Back
+            </button>
             <button className="primary-action" onClick={handleNext} disabled={!isCreator}>
               <ChevronRight aria-hidden="true" />
               Next
@@ -635,10 +836,6 @@ function RoomView({ room, user, onBack }: { room: Room; user: User; onBack: () =
               <Plus aria-hidden="true" />
               Add
             </button>
-            <button className="tool-button" onClick={resetRound} disabled={!isCreator}>
-              <RotateCcw aria-hidden="true" />
-              Reset Round
-            </button>
             {isCreator && (
               <>
                 <button className="toggle-button" onClick={() => toggleVisibility("hideHpFromInvitees")}>
@@ -647,6 +844,10 @@ function RoomView({ room, user, onBack }: { room: Room; user: User; onBack: () =
                 <button className="toggle-button" onClick={() => toggleVisibility("hideAcFromInvitees")}>
                   AC: {room.hideAcFromInvitees ? "Hidden" : "Visible"}
                 </button>
+                <button className="tool-button" onClick={resetRound} disabled={!isCreator}>
+                  <RotateCcw aria-hidden="true" />
+                  Reset Round
+                </button>
               </>
             )}
           </div>
@@ -654,7 +855,6 @@ function RoomView({ room, user, onBack }: { room: Room; user: User; onBack: () =
           <div className="initiative-table">
             <div className="combat-heading">
               <span>Combat</span>
-              <small>Round {room.round}</small>
             </div>
 
             <DndContext
@@ -670,7 +870,7 @@ function RoomView({ room, user, onBack }: { room: Room; user: User; onBack: () =
                       combatant={combatant}
                       round={room.round}
                       active={combatant.id === room.activeCombatantId}
-                      canManage={isCreator}
+                      canManage={isCreator || combatant.ownerUid === user.uid}
                       canEdit={isCreator || combatant.ownerUid === user.uid}
                       canDrag={isCreator}
                       hideHp={!isCreator && room.hideHpFromInvitees}
@@ -717,6 +917,7 @@ function CombatantRow({
   const [conditionName, setConditionName] = useState<Condition>("blinded");
   const [conditionRounds, setConditionRounds] = useState("");
   const [hpActionAmount, setHpActionAmount] = useState("");
+  const [concentrationSaveDc, setConcentrationSaveDc] = useState<number | null>(null);
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: combatant.id,
     disabled: !canDrag,
@@ -774,6 +975,20 @@ function CombatantRow({
 
     onUpdate({ hp: nextHp });
     setHpActionAmount("");
+
+    if (direction === "damage" && conditions.some((condition) => condition.name === "concentration")) {
+      setConcentrationSaveDc(Math.max(10, Math.floor(amount / 2)));
+    }
+  }
+
+  function resolveConcentrationSave(failed: boolean) {
+    if (failed) {
+      onUpdate({
+        conditions: conditions.filter((condition) => condition.name !== "concentration"),
+      });
+    }
+
+    setConcentrationSaveDc(null);
   }
 
   return (
@@ -799,6 +1014,7 @@ function CombatantRow({
         <input
           className="name-input"
           value={combatant.name}
+          placeholder="Name"
           disabled={!canManage}
           onChange={(event) => onUpdate({ name: event.target.value })}
           aria-label="Combatant name"
@@ -951,6 +1167,24 @@ function CombatantRow({
       <button className="icon-button danger" disabled={!canManage} onClick={onRemove} title="Remove combatant">
         <Trash2 aria-hidden="true" />
       </button>
+      {concentrationSaveDc !== null && (
+        <div className="modal-backdrop locked-modal" role="presentation">
+          <div className="confirm-modal" role="dialog" aria-modal="true" aria-labelledby="concentration-save-title">
+            <h2 id="concentration-save-title">Concentration Save</h2>
+            <p>
+              DC <strong>{concentrationSaveDc}</strong>
+            </p>
+            <div className="confirm-actions">
+              <button className="tool-button" onClick={() => resolveConcentrationSave(false)}>
+                Success
+              </button>
+              <button className="tool-button danger" onClick={() => resolveConcentrationSave(true)}>
+                Failed
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -34,7 +34,7 @@ service cloud.firestore {
 
     function ownedCombatantEditOnly() {
       return request.resource.data.diff(resource.data).changedKeys()
-        .hasOnly(['hp', 'ac', 'conditions', 'exhaustionLevel', 'updatedAt']);
+        .hasOnly(['initiative', 'name', 'hp', 'maxHp', 'ac', 'conditions', 'exhaustionLevel', 'updatedAt']);
     }
 
     match /users/{userId} {
@@ -77,7 +77,11 @@ service cloud.firestore {
             && request.resource.data.type == resource.data.type
             && ownedCombatantEditOnly()
           );
-        allow delete: if isRoomCreator(roomId);
+        allow delete: if isRoomCreator(roomId)
+          || (
+            isRoomMember(roomId)
+            && resource.data.ownerUid == request.auth.uid
+          );
       }
     }
   }
