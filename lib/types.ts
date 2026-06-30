@@ -30,6 +30,7 @@ export type Room = {
   creatorUid: string;
   creatorEmail: string;
   invitedEmails: string[];
+  pendingInvitedEmails?: string[];
   round: number;
   activeCombatantId: string;
   hideHpFromInvitees: boolean;

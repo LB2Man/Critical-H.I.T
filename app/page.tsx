@@ -106,19 +106,28 @@ export default function Home() {
 
     const createdQuery = query(collection(db, "rooms"), where("creatorUid", "==", user.uid));
     const invitedQuery = query(collection(db, "rooms"), where("invitedEmails", "array-contains", user.email));
+    const pendingQuery = query(collection(db, "rooms"), where("pendingInvitedEmails", "array-contains", user.email));
 
-    const roomMap = new Map<string, Room>();
+    const createdRooms = new Map<string, Room>();
+    const invitedRooms = new Map<string, Room>();
+    const pendingRooms = new Map<string, Room>();
     const publish = () =>
       setRooms(
-        Array.from(roomMap.values()).sort((a, b) => a.name.localeCompare(b.name)),
+        Array.from(
+          new Map([
+            ...pendingRooms,
+            ...invitedRooms,
+            ...createdRooms,
+          ]).values(),
+        ).sort((a, b) => a.name.localeCompare(b.name)),
       );
 
     const unsubscribeCreated = onSnapshot(createdQuery, (snapshot) => {
       snapshot.docChanges().forEach((change) => {
         if (change.type === "removed") {
-          roomMap.delete(change.doc.id);
+          createdRooms.delete(change.doc.id);
         } else {
-          roomMap.set(change.doc.id, { id: change.doc.id, ...change.doc.data() } as Room);
+          createdRooms.set(change.doc.id, { id: change.doc.id, ...change.doc.data() } as Room);
         }
       });
       publish();
@@ -127,9 +136,20 @@ export default function Home() {
     const unsubscribeInvited = onSnapshot(invitedQuery, (snapshot) => {
       snapshot.docChanges().forEach((change) => {
         if (change.type === "removed") {
-          roomMap.delete(change.doc.id);
+          invitedRooms.delete(change.doc.id);
         } else {
-          roomMap.set(change.doc.id, { id: change.doc.id, ...change.doc.data() } as Room);
+          invitedRooms.set(change.doc.id, { id: change.doc.id, ...change.doc.data() } as Room);
+        }
+      });
+      publish();
+    });
+
+    const unsubscribePending = onSnapshot(pendingQuery, (snapshot) => {
+      snapshot.docChanges().forEach((change) => {
+        if (change.type === "removed") {
+          pendingRooms.delete(change.doc.id);
+        } else {
+          pendingRooms.set(change.doc.id, { id: change.doc.id, ...change.doc.data() } as Room);
         }
       });
       publish();
@@ -138,6 +158,7 @@ export default function Home() {
     return () => {
       unsubscribeCreated();
       unsubscribeInvited();
+      unsubscribePending();
     };
   }, [user]);
 
@@ -162,6 +183,7 @@ export default function Home() {
       creatorUid: user.uid,
       creatorEmail: user.email,
       invitedEmails: [],
+      pendingInvitedEmails: [],
       round: 1,
       activeCombatantId: "",
       hideHpFromInvitees: false,
@@ -172,6 +194,23 @@ export default function Home() {
 
     setActiveRoomId(roomRef.id);
     setView("room");
+  }
+
+  async function acceptCampaignInvite(roomId: string) {
+    if (!user?.email) return;
+    await updateDoc(doc(db, "rooms", roomId), {
+      invitedEmails: arrayUnion(user.email),
+      pendingInvitedEmails: arrayRemove(user.email),
+      updatedAt: serverTimestamp(),
+    });
+  }
+
+  async function declineCampaignInvite(roomId: string) {
+    if (!user?.email) return;
+    await updateDoc(doc(db, "rooms", roomId), {
+      pendingInvitedEmails: arrayRemove(user.email),
+      updatedAt: serverTimestamp(),
+    });
   }
 
   if (!firebaseReady) {
@@ -210,6 +249,8 @@ export default function Home() {
             setActiveRoomId(roomId);
             setView("room");
           }}
+          onAcceptInvite={acceptCampaignInvite}
+          onDeclineInvite={declineCampaignInvite}
         />
       ) : activeRoom ? (
         <RoomView room={activeRoom} user={user} onBack={() => setView("rooms")} />
@@ -222,6 +263,8 @@ export default function Home() {
             setActiveRoomId(roomId);
             setView("room");
           }}
+          onAcceptInvite={acceptCampaignInvite}
+          onDeclineInvite={declineCampaignInvite}
         />
       )}
     </main>
@@ -270,11 +313,15 @@ function RoomsView({
   user,
   onCreateRoom,
   onOpenRoom,
+  onAcceptInvite,
+  onDeclineInvite,
 }: {
   rooms: Room[];
   user: User;
   onCreateRoom: (formData: FormData) => void;
   onOpenRoom: (roomId: string) => void;
+  onAcceptInvite: (roomId: string) => void;
+  onDeclineInvite: (roomId: string) => void;
 }) {
   return (
     <section className="room-list-page">
@@ -291,13 +338,32 @@ function RoomsView({
       </form>
 
       <div className="rooms-grid">
-        {rooms.map((room) => (
-          <button className="room-card" key={room.id} onClick={() => onOpenRoom(room.id)}>
-            <Users aria-hidden="true" />
-            <span>{room.name}</span>
-            <small>{room.creatorUid === user.uid ? "Creator" : "Invited"}</small>
-          </button>
-        ))}
+        {rooms.map((room) => {
+          const isPending = Boolean(user.email && room.pendingInvitedEmails?.includes(user.email));
+          const isCreator = room.creatorUid === user.uid;
+
+          return (
+            <div className="room-card" key={room.id}>
+              <Users aria-hidden="true" />
+              <span>{room.name}</span>
+              <small>{isCreator ? "Creator" : isPending ? "Pending invite" : "Invited"}</small>
+              {isPending ? (
+                <div className="campaign-invite-actions">
+                  <button className="tool-button" onClick={() => onAcceptInvite(room.id)}>
+                    Accept
+                  </button>
+                  <button className="tool-button danger" onClick={() => onDeclineInvite(room.id)}>
+                    Decline
+                  </button>
+                </div>
+              ) : (
+                <button className="tool-button" onClick={() => onOpenRoom(room.id)}>
+                  Open
+                </button>
+              )}
+            </div>
+          );
+        })}
         {rooms.length === 0 && (
           <div className="empty-state">Create your first campaign to start tracking combat.</div>
         )}
@@ -332,9 +398,13 @@ function RoomView({ room, user, onBack }: { room: Room; user: User; onBack: () =
     event.preventDefault();
     const email = inviteEmail.trim().toLowerCase();
     if (!email || !isCreator) return;
+    if (room.invitedEmails.includes(email) || (room.pendingInvitedEmails ?? []).includes(email)) {
+      setInviteEmail("");
+      return;
+    }
 
     await updateDoc(doc(db, "rooms", room.id), {
-      invitedEmails: arrayUnion(email),
+      pendingInvitedEmails: arrayUnion(email),
       updatedAt: serverTimestamp(),
     });
     setInviteEmail("");
@@ -483,6 +553,7 @@ function RoomView({ room, user, onBack }: { room: Room; user: User; onBack: () =
     if (!isCreator) return;
     await updateDoc(doc(db, "rooms", room.id), {
       invitedEmails: arrayRemove(email),
+      pendingInvitedEmails: arrayRemove(email),
       updatedAt: serverTimestamp(),
     });
   }
@@ -532,10 +603,13 @@ function RoomView({ room, user, onBack }: { room: Room; user: User; onBack: () =
             </button>
           </form>
           <div className="invite-list">
-            {room.invitedEmails.length ? (
-              room.invitedEmails.map((email) => (
+            {Array.from(new Set([...room.invitedEmails, ...(room.pendingInvitedEmails ?? [])])).length ? (
+              Array.from(new Set([...room.invitedEmails, ...(room.pendingInvitedEmails ?? [])])).map((email) => (
                 <div className="invite-row" key={email}>
-                  <span>{email}</span>
+                  <span>
+                    {email}
+                    {(room.pendingInvitedEmails ?? []).includes(email) ? " (pending)" : ""}
+                  </span>
                   <button className="tool-button danger" onClick={() => removeInvite(email)}>
                     Remove
                   </button>

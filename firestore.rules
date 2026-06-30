@@ -23,6 +23,15 @@ service cloud.firestore {
         && (room(roomId).creatorUid == request.auth.uid || userEmail() in room(roomId).invitedEmails);
     }
 
+    function isPendingRoomInvite() {
+      return signedIn() && userEmail() in resource.data.pendingInvitedEmails;
+    }
+
+    function inviteResponseOnly() {
+      return request.resource.data.diff(resource.data).changedKeys()
+        .hasOnly(['invitedEmails', 'pendingInvitedEmails', 'updatedAt']);
+    }
+
     function ownedCombatantEditOnly() {
       return request.resource.data.diff(resource.data).changedKeys()
         .hasOnly(['hp', 'ac', 'conditions', 'exhaustionLevel', 'updatedAt']);
@@ -37,12 +46,18 @@ service cloud.firestore {
 
     match /rooms/{roomId} {
       allow read: if signedIn()
-        && (resource.data.creatorUid == request.auth.uid || userEmail() in resource.data.invitedEmails);
+        && (
+          resource.data.creatorUid == request.auth.uid
+          || userEmail() in resource.data.invitedEmails
+          || userEmail() in resource.data.pendingInvitedEmails
+        );
       allow create: if signedIn()
         && request.resource.data.creatorUid == request.auth.uid
         && request.resource.data.invitedEmails is list
+        && request.resource.data.pendingInvitedEmails is list
         && request.resource.data.round == 1;
-      allow update, delete: if isRoomCreator(roomId);
+      allow update: if isRoomCreator(roomId) || (isPendingRoomInvite() && inviteResponseOnly());
+      allow delete: if isRoomCreator(roomId);
 
       match /combatants/{combatantId} {
         allow read: if isRoomMember(roomId);

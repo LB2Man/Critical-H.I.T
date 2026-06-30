@@ -256,6 +256,12 @@ select:focus {
   color: var(--muted);
 }
 
+.campaign-invite-actions {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
 .room-header {
   justify-content: space-between;
 }
@@ -569,6 +575,11 @@ summary {
 .combat-row.active {
   border-color: #b89628;
   background: rgba(57, 42, 16, 0.72);
+}
+
+.combat-row.active.down {
+  border-color: #b89628;
+  background: rgba(126, 16, 24, 0.92);
 }
 
 .combatant-main {
