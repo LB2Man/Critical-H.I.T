@@ -20,12 +20,11 @@ import {
 import { CSS } from "@dnd-kit/utilities";
 import {
   addDoc,
+  arrayRemove,
   arrayUnion,
   collection,
   deleteDoc,
   doc,
-  getDocs,
-  limit,
   onSnapshot,
   orderBy,
   query,
@@ -39,12 +38,14 @@ import { onAuthStateChanged, signInWithPopup, signOut, User } from "firebase/aut
 import {
   ChevronRight,
   GripVertical,
+  HeartPulse,
   LogOut,
   Plus,
   RotateCcw,
   Shield,
   Skull,
   SortDesc,
+  Sword,
   Trash2,
   Users,
 } from "lucide-react";
@@ -52,16 +53,17 @@ import { auth, db, firebaseReady, googleProvider } from "../lib/firebase";
 import {
   Combatant,
   Condition,
+  ActiveCondition,
   HpVisibility,
   Room,
   CONDITIONS,
   conditionLabel,
   hiddenHpStatus,
+  normalizeConditions,
 } from "../lib/types";
 
 type View = "rooms" | "room";
-
-const numberOrZero = (value: FormDataEntryValue | null) => Number(value || 0);
+type RoomTab = "initiative" | "invite";
 
 export default function Home() {
   const [user, setUser] = useState<User | null>(null);
@@ -254,7 +256,7 @@ function SignInScreen({ onSignIn }: { onSignIn: () => void }) {
         <Skull aria-hidden="true" />
       </div>
       <h1>Critical H.I.T</h1>
-      <p>Sign in with Google to enter your combat rooms.</p>
+      <p>Sign in with Google to enter your campaigns.</p>
       <button className="primary-action" onClick={onSignIn}>
         <Shield aria-hidden="true" />
         Sign in with Google
@@ -277,15 +279,14 @@ function RoomsView({
   return (
     <section className="room-list-page">
       <div className="page-heading">
-        <p className="eyebrow">War Rooms</p>
-        <h1>Choose a combat room</h1>
+        <h1>Choose a Campaign</h1>
       </div>
 
       <form className="create-room" action={onCreateRoom}>
-        <input name="roomName" placeholder="Room name" aria-label="Room name" />
+        <input name="roomName" placeholder="Campaign name" aria-label="Campaign name" />
         <button className="primary-action" type="submit">
           <Plus aria-hidden="true" />
-          Create Room
+          Create Campaign
         </button>
       </form>
 
@@ -298,7 +299,7 @@ function RoomsView({
           </button>
         ))}
         {rooms.length === 0 && (
-          <div className="empty-state">Create your first room to start tracking combat.</div>
+          <div className="empty-state">Create your first campaign to start tracking combat.</div>
         )}
       </div>
     </section>
@@ -309,6 +310,7 @@ function RoomView({ room, user, onBack }: { room: Room; user: User; onBack: () =
   const isCreator = room.creatorUid === user.uid;
   const [combatants, setCombatants] = useState<Combatant[]>([]);
   const [inviteEmail, setInviteEmail] = useState("");
+  const [activeTab, setActiveTab] = useState<RoomTab>("initiative");
 
   useEffect(() => {
     const combatantsQuery = query(
@@ -350,6 +352,7 @@ function RoomView({ room, user, onBack }: { room: Room; user: User; onBack: () =
       hp: 10,
       maxHp: 10,
       ac: 10,
+      exhaustionLevel: 0,
       ownerUid: isPlayer ? user.uid : "",
       ownerEmail: isPlayer ? user.email : "",
       type: isPlayer ? "player" : "npc",
@@ -414,11 +417,28 @@ function RoomView({ room, user, onBack }: { room: Room; user: User; onBack: () =
     const nextIndex = currentIndex + 1;
     const isNewRound = nextIndex >= combatants.length;
 
-    await updateDoc(doc(db, "rooms", room.id), {
+    const nextCombatant = isNewRound ? combatants[0] : combatants[nextIndex];
+    const nextRound = isNewRound ? room.round + 1 : room.round;
+    const batch = writeBatch(db);
+
+    batch.update(doc(db, "rooms", room.id), {
       activeCombatantId: isNewRound ? combatants[0].id : combatants[nextIndex].id,
-      round: isNewRound ? room.round + 1 : room.round,
+      round: nextRound,
       updatedAt: serverTimestamp(),
     });
+
+    const remainingConditions = normalizeConditions(nextCombatant.conditions).filter(
+      (condition) => !condition.expiresOnRound || condition.expiresOnRound > nextRound,
+    );
+
+    if (remainingConditions.length !== normalizeConditions(nextCombatant.conditions).length) {
+      batch.update(doc(db, "rooms", room.id, "combatants", nextCombatant.id), {
+        conditions: remainingConditions,
+        updatedAt: serverTimestamp(),
+      });
+    }
+
+    await batch.commit();
   }
 
   async function resetRound() {
@@ -459,11 +479,19 @@ function RoomView({ room, user, onBack }: { room: Room; user: User; onBack: () =
     });
   }
 
+  async function removeInvite(email: string) {
+    if (!isCreator) return;
+    await updateDoc(doc(db, "rooms", room.id), {
+      invitedEmails: arrayRemove(email),
+      updatedAt: serverTimestamp(),
+    });
+  }
+
   return (
     <section className="room-page">
       <div className="room-header">
         <button className="subtle-button" onClick={onBack}>
-          Rooms
+          Campaigns
         </button>
         <div>
           <p className="eyebrow">Initiative</p>
@@ -473,99 +501,124 @@ function RoomView({ room, user, onBack }: { room: Room; user: User; onBack: () =
       </div>
 
       <nav className="tabs" aria-label="Room tools">
-        <button className="tab active">Initiative</button>
-        <button className="tab" disabled>
-          Coming next
+        <button
+          className={`tab${activeTab === "initiative" ? " active" : ""}`}
+          onClick={() => setActiveTab("initiative")}
+        >
+          Initiative
+        </button>
+        <button
+          className={`tab${activeTab === "invite" ? " active" : ""}`}
+          onClick={() => setActiveTab("invite")}
+          disabled={!isCreator}
+        >
+          Invite Player
         </button>
       </nav>
 
-      <div className="tracker-toolbar">
-        <button className="primary-action" onClick={handleNext} disabled={!isCreator}>
-          <ChevronRight aria-hidden="true" />
-          Next
-        </button>
-        <button className="tool-button" onClick={sortByInitiative} disabled={!isCreator}>
-          <SortDesc aria-hidden="true" />
-          Sort
-        </button>
-        <button className="tool-button" onClick={addCombatant}>
-          <Plus aria-hidden="true" />
-          Add
-        </button>
-        <button className="tool-button" onClick={resetRound} disabled={!isCreator}>
-          <RotateCcw aria-hidden="true" />
-          Reset Round
-        </button>
-        {isCreator && (
-          <>
-            <button className="toggle-button" onClick={() => toggleVisibility("hideHpFromInvitees")}>
-              HP: {room.hideHpFromInvitees ? "Status" : "Visible"}
+      {activeTab === "invite" && isCreator ? (
+        <section className="invite-panel">
+          <h2>Invite Player</h2>
+          <form className="invite-bar" onSubmit={addInvite}>
+            <input
+              value={inviteEmail}
+              onChange={(event) => setInviteEmail(event.target.value)}
+              placeholder="Invite by registered email"
+              type="email"
+              aria-label="Invite by registered email"
+            />
+            <button className="tool-button" type="submit">
+              Invite
             </button>
-            <button className="toggle-button" onClick={() => toggleVisibility("hideAcFromInvitees")}>
-              AC: {room.hideAcFromInvitees ? "Hidden" : "Visible"}
+          </form>
+          <div className="invite-list">
+            {room.invitedEmails.length ? (
+              room.invitedEmails.map((email) => (
+                <div className="invite-row" key={email}>
+                  <span>{email}</span>
+                  <button className="tool-button danger" onClick={() => removeInvite(email)}>
+                    Remove
+                  </button>
+                </div>
+              ))
+            ) : (
+              <div className="empty-state">No invited players yet.</div>
+            )}
+          </div>
+        </section>
+      ) : (
+        <div className="initiative-tab">
+          <div className="tracker-toolbar">
+            <button className="primary-action" onClick={handleNext} disabled={!isCreator}>
+              <ChevronRight aria-hidden="true" />
+              Next
             </button>
-          </>
-        )}
-      </div>
+            <button className="tool-button" onClick={sortByInitiative} disabled={!isCreator}>
+              <SortDesc aria-hidden="true" />
+              Sort
+            </button>
+            <button className="tool-button" onClick={addCombatant}>
+              <Plus aria-hidden="true" />
+              Add
+            </button>
+            <button className="tool-button" onClick={resetRound} disabled={!isCreator}>
+              <RotateCcw aria-hidden="true" />
+              Reset Round
+            </button>
+            {isCreator && (
+              <>
+                <button className="toggle-button" onClick={() => toggleVisibility("hideHpFromInvitees")}>
+                  HP: {room.hideHpFromInvitees ? "Status" : "Visible"}
+                </button>
+                <button className="toggle-button" onClick={() => toggleVisibility("hideAcFromInvitees")}>
+                  AC: {room.hideAcFromInvitees ? "Hidden" : "Visible"}
+                </button>
+              </>
+            )}
+          </div>
 
-      {isCreator && (
-        <form className="invite-bar" onSubmit={addInvite}>
-          <input
-            value={inviteEmail}
-            onChange={(event) => setInviteEmail(event.target.value)}
-            placeholder="Invite by registered email"
-            type="email"
-            aria-label="Invite by registered email"
-          />
-          <button className="tool-button" type="submit">
-            Invite
-          </button>
-        </form>
-      )}
-
-      <div className="initiative-table">
-        <div className="table-head">
-          <span></span>
-          <span>Initiative</span>
-          <span>Name</span>
-          <span>Conditions</span>
-          <span>HP</span>
-          <span>AC</span>
-          <span></span>
-        </div>
-
-        <DndContext
-          sensors={sensors}
-          collisionDetection={closestCenter}
-          onDragEnd={handleDragEnd}
-        >
-          <SortableContext items={combatants.map((item) => item.id)} strategy={verticalListSortingStrategy}>
-            <div className="table-body">
-              {combatants.map((combatant) => (
-                <CombatantRow
-                  key={combatant.id}
-                  combatant={combatant}
-                  active={combatant.id === room.activeCombatantId}
-                  canManage={isCreator}
-                  canEdit={isCreator || combatant.ownerUid === user.uid}
-                  canDrag={isCreator}
-                  hideHp={!isCreator && room.hideHpFromInvitees}
-                  hideAc={!isCreator && room.hideAcFromInvitees}
-                  onUpdate={(patch) => updateCombatant(combatant.id, patch)}
-                  onRemove={() => removeCombatant(combatant.id)}
-                />
-              ))}
-              {combatants.length === 0 && <div className="empty-state">No combatants yet.</div>}
+          <div className="initiative-table">
+            <div className="combat-heading">
+              <span>Combat</span>
+              <small>Round {room.round}</small>
             </div>
-          </SortableContext>
-        </DndContext>
-      </div>
+
+            <DndContext
+              sensors={sensors}
+              collisionDetection={closestCenter}
+              onDragEnd={handleDragEnd}
+            >
+              <SortableContext items={combatants.map((item) => item.id)} strategy={verticalListSortingStrategy}>
+                <div className="table-body">
+                  {combatants.map((combatant) => (
+                    <CombatantRow
+                      key={combatant.id}
+                      combatant={combatant}
+                      round={room.round}
+                      active={combatant.id === room.activeCombatantId}
+                      canManage={isCreator}
+                      canEdit={isCreator || combatant.ownerUid === user.uid}
+                      canDrag={isCreator}
+                      hideHp={!isCreator && room.hideHpFromInvitees}
+                      hideAc={!isCreator && room.hideAcFromInvitees}
+                      onUpdate={(patch) => updateCombatant(combatant.id, patch)}
+                      onRemove={() => removeCombatant(combatant.id)}
+                    />
+                  ))}
+                  {combatants.length === 0 && <div className="empty-state">No combatants yet.</div>}
+                </div>
+              </SortableContext>
+            </DndContext>
+          </div>
+        </div>
+      )}
     </section>
   );
 }
 
 function CombatantRow({
   combatant,
+  round,
   active,
   canManage,
   canEdit,
@@ -576,6 +629,7 @@ function CombatantRow({
   onRemove,
 }: {
   combatant: Combatant;
+  round: number;
   active: boolean;
   canManage: boolean;
   canEdit: boolean;
@@ -585,6 +639,10 @@ function CombatantRow({
   onUpdate: (patch: Partial<Combatant>) => void;
   onRemove: () => void;
 }) {
+  const [addingCondition, setAddingCondition] = useState(false);
+  const [conditionName, setConditionName] = useState<Condition>("blinded");
+  const [conditionRounds, setConditionRounds] = useState("");
+  const [hpActionAmount, setHpActionAmount] = useState("");
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: combatant.id,
     disabled: !canDrag,
@@ -594,13 +652,54 @@ function CombatantRow({
     transform: CSS.Transform.toString(transform),
     transition,
   };
+  const conditions = normalizeConditions(combatant.conditions);
+  const exhaustionLevel = combatant.exhaustionLevel ?? 0;
 
-  function toggleCondition(condition: Condition) {
-    const current = combatant.conditions || [];
-    const next = current.includes(condition)
-      ? current.filter((item) => item !== condition)
-      : [...current, condition];
-    onUpdate({ conditions: next });
+  function addCondition(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!canEdit) return;
+
+    const rounds = Number(conditionRounds);
+    const hasRounds = Number.isFinite(rounds) && rounds > 0;
+    const nextCondition: ActiveCondition = {
+      id: `${conditionName}-${Date.now()}`,
+      name: conditionName,
+    };
+
+    if (hasRounds) {
+      nextCondition.rounds = rounds;
+      nextCondition.expiresOnRound = round + rounds;
+    }
+
+    onUpdate({ conditions: [...conditions, nextCondition] });
+    setConditionRounds("");
+    setAddingCondition(false);
+  }
+
+  function removeCondition(id: string) {
+    if (!canEdit) return;
+    onUpdate({ conditions: conditions.filter((condition) => condition.id !== id) });
+  }
+
+  function conditionRoundsLeft(condition: ActiveCondition) {
+    if (!condition.expiresOnRound) return "";
+    const remaining = Math.max(0, condition.expiresOnRound - round);
+    return `${remaining} ${remaining === 1 ? "round" : "rounds"} left`;
+  }
+
+  function applyHpDelta(direction: "damage" | "heal") {
+    if (!canEdit) return;
+
+    const amount = Number(hpActionAmount);
+    if (!Number.isFinite(amount) || amount <= 0) return;
+
+    const nextHp =
+      direction === "damage"
+        ? Math.max(0, combatant.hp - amount)
+        : Math.min(combatant.maxHp, combatant.hp + amount);
+
+    onUpdate({ hp: nextHp });
+    setHpActionAmount("");
   }
 
   return (
@@ -612,77 +711,168 @@ function CombatantRow({
       <button className="drag-handle" disabled={!canDrag} {...attributes} {...listeners} title="Drag row">
         <GripVertical aria-hidden="true" />
       </button>
-      <input
-        type="number"
-        value={combatant.initiative}
-        disabled={!canManage}
-        onChange={(event) => onUpdate({ initiative: Number(event.target.value) })}
-        aria-label={`${combatant.name} initiative`}
-      />
-      <input
-        value={combatant.name}
-        disabled={!canManage}
-        onChange={(event) => onUpdate({ name: event.target.value })}
-        aria-label="Combatant name"
-      />
-      <div className="conditions-cell">
-        <details>
-          <summary>{combatant.conditions?.length ? `${combatant.conditions.length} active` : "None"}</summary>
-          <div className="condition-menu">
-            {CONDITIONS.map((condition) => (
-              <label key={condition}>
-                <input
-                  type="checkbox"
-                  checked={combatant.conditions?.includes(condition) || false}
-                  disabled={!canEdit}
-                  onChange={() => toggleCondition(condition)}
-                />
-                {conditionLabel(condition)}
-              </label>
-            ))}
-          </div>
-        </details>
+      <label className="field-stack initiative-field">
+        <span>Init</span>
+        <input
+          type="number"
+          value={combatant.initiative}
+          disabled={!canManage}
+          onChange={(event) => onUpdate({ initiative: Number(event.target.value) })}
+          aria-label={`${combatant.name} initiative`}
+        />
+      </label>
+      <div className="combatant-main">
+        <input
+          className="name-input"
+          value={combatant.name}
+          disabled={!canManage}
+          onChange={(event) => onUpdate({ name: event.target.value })}
+          aria-label="Combatant name"
+        />
         <div className="condition-tags">
-          {(combatant.conditions || []).map((condition) => (
-            <span key={condition}>{conditionLabel(condition)}</span>
+          {conditions.map((condition) => (
+            <button
+              className="condition-chip"
+              key={condition.id}
+              disabled={!canEdit}
+              onClick={() => removeCondition(condition.id)}
+              title="Remove condition"
+            >
+              {conditionLabel(condition.name)}
+              {condition.rounds ? ` (${conditionRoundsLeft(condition)})` : ""}
+              <span aria-hidden="true">x</span>
+            </button>
           ))}
+          {conditions.length === 0 && <span className="no-conditions">No conditions</span>}
+        </div>
+        <div className="add-condition-wrap">
+          <button className="add-condition" disabled={!canEdit} onClick={() => setAddingCondition(true)}>
+            + Add Condition
+          </button>
+          {addingCondition && (
+            <form className="condition-menu" onSubmit={addCondition}>
+              <select
+                value={conditionName}
+                onChange={(event) => setConditionName(event.target.value as Condition)}
+                aria-label="Condition"
+              >
+                {CONDITIONS.map((condition) => (
+                  <option key={condition} value={condition}>
+                    {conditionLabel(condition)}
+                  </option>
+                ))}
+              </select>
+              <input
+                type="number"
+                min="1"
+                value={conditionRounds}
+                onChange={(event) => setConditionRounds(event.target.value)}
+                placeholder="Rounds"
+                aria-label="Round limit"
+              />
+              <button className="tool-button" type="submit">
+                Add
+              </button>
+              <button className="subtle-button" type="button" onClick={() => setAddingCondition(false)}>
+                Cancel
+              </button>
+            </form>
+          )}
         </div>
       </div>
-      <div className="hp-cell">
-        {hideHp ? (
-          <strong>{hiddenHpStatus(combatant.hp, combatant.maxHp)}</strong>
-        ) : (
-          <>
+      <div className="stat-fields">
+        <label className="field-stack hp-field">
+          <div className="hp-control">
+            <div className="hp-cell">
+              <input
+                className="hp-action-amount"
+                type="number"
+                min="1"
+                value={hpActionAmount}
+                disabled={!canEdit}
+                onChange={(event) => setHpActionAmount(event.target.value)}
+                placeholder=""
+                aria-label="Damage or healing amount"
+              />
+              <div className="hp-action-buttons">
+                <button
+                  className="mini-icon danger"
+                  type="button"
+                  disabled={!canEdit}
+                  onClick={() => applyHpDelta("damage")}
+                  title="Damage"
+                >
+                  <Sword aria-hidden="true" />
+                </button>
+                <button
+                  className="mini-icon heal"
+                  type="button"
+                  disabled={!canEdit}
+                  onClick={() => applyHpDelta("heal")}
+                  title="Heal"
+                >
+                  <HeartPulse aria-hidden="true" />
+                </button>
+              </div>
+              {hideHp ? (
+                <strong>{hiddenHpStatus(combatant.hp, combatant.maxHp)}</strong>
+              ) : (
+                <>
+                  <label className="inline-stat-field">
+                    <span>HP</span>
+                    <input
+                      type="number"
+                      value={combatant.hp}
+                      disabled={!canEdit}
+                      onChange={(event) => onUpdate({ hp: Number(event.target.value) })}
+                      aria-label={`${combatant.name} current HP`}
+                    />
+                  </label>
+                  <span>/</span>
+                  <label className="inline-stat-field">
+                    <span>Max HP</span>
+                    <input
+                      type="number"
+                      value={combatant.maxHp}
+                      disabled={!canManage}
+                      onChange={(event) => onUpdate({ maxHp: Number(event.target.value) })}
+                      aria-label={`${combatant.name} max HP`}
+                    />
+                  </label>
+                </>
+              )}
+            </div>
+          </div>
+        </label>
+        <label className="field-stack">
+          <span>AC</span>
+          {hideAc ? (
+            <strong>Hidden</strong>
+          ) : (
             <input
               type="number"
-              value={combatant.hp}
+              value={combatant.ac}
               disabled={!canEdit}
-              onChange={(event) => onUpdate({ hp: Number(event.target.value) })}
-              aria-label={`${combatant.name} current HP`}
+              onChange={(event) => onUpdate({ ac: Number(event.target.value) })}
+              aria-label={`${combatant.name} AC`}
             />
-            <span>/</span>
-            <input
-              type="number"
-              value={combatant.maxHp}
-              disabled={!canManage}
-              onChange={(event) => onUpdate({ maxHp: Number(event.target.value) })}
-              aria-label={`${combatant.name} max HP`}
-            />
-          </>
-        )}
-      </div>
-      <div className="ac-cell">
-        {hideAc ? (
-          <strong>Hidden</strong>
-        ) : (
-          <input
-            type="number"
-            value={combatant.ac}
+          )}
+        </label>
+        <label className="field-stack">
+          <span>Exh</span>
+          <select
+            value={exhaustionLevel}
             disabled={!canEdit}
-            onChange={(event) => onUpdate({ ac: Number(event.target.value) })}
-            aria-label={`${combatant.name} AC`}
-          />
-        )}
+            onChange={(event) => onUpdate({ exhaustionLevel: Number(event.target.value) })}
+            aria-label={`${combatant.name} exhaustion level`}
+          >
+            {[0, 1, 2, 3, 4, 5, 6].map((level) => (
+              <option key={level} value={level}>
+                {level}
+              </option>
+            ))}
+          </select>
+        </label>
       </div>
       <button className="icon-button danger" disabled={!canManage} onClick={onRemove} title="Remove combatant">
         <Trash2 aria-hidden="true" />

@@ -25,7 +25,7 @@ service cloud.firestore {
 
     function ownedCombatantEditOnly() {
       return request.resource.data.diff(resource.data).changedKeys()
-        .hasOnly(['hp', 'ac', 'conditions', 'updatedAt']);
+        .hasOnly(['hp', 'ac', 'conditions', 'exhaustionLevel', 'updatedAt']);
     }
 
     match /users/{userId} {
@@ -36,7 +36,8 @@ service cloud.firestore {
     }
 
     match /rooms/{roomId} {
-      allow read: if isRoomMember(roomId);
+      allow read: if signedIn()
+        && (resource.data.creatorUid == request.auth.uid || userEmail() in resource.data.invitedEmails);
       allow create: if signedIn()
         && request.resource.data.creatorUid == request.auth.uid
         && request.resource.data.invitedEmails is list

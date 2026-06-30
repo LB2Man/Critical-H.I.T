@@ -2,12 +2,6 @@ export const CONDITIONS = [
   "blinded",
   "charmed",
   "deafened",
-  "exhaustion-1",
-  "exhaustion-2",
-  "exhaustion-3",
-  "exhaustion-4",
-  "exhaustion-5",
-  "exhaustion-6",
   "grappled",
   "frightened",
   "incapacitated",
@@ -22,6 +16,13 @@ export const CONDITIONS = [
 
 export type Condition = (typeof CONDITIONS)[number];
 export type HpVisibility = "hideHpFromInvitees" | "hideAcFromInvitees";
+
+export type ActiveCondition = {
+  id: string;
+  name: Condition;
+  rounds?: number;
+  expiresOnRound?: number;
+};
 
 export type Room = {
   id: string;
@@ -39,10 +40,11 @@ export type Combatant = {
   id: string;
   initiative: number;
   name: string;
-  conditions: Condition[];
+  conditions: ActiveCondition[];
   hp: number;
   maxHp: number;
   ac: number;
+  exhaustionLevel: number;
   ownerUid: string;
   ownerEmail: string;
   type: "player" | "npc";
@@ -50,14 +52,50 @@ export type Combatant = {
 };
 
 export function conditionLabel(condition: Condition) {
-  if (condition.startsWith("exhaustion-")) {
-    return `Exhaustion Level ${condition.at(-1)}`;
-  }
-
   return condition
     .split("-")
     .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
     .join(" ");
+}
+
+export function normalizeConditions(conditions: unknown): ActiveCondition[] {
+  if (!Array.isArray(conditions)) return [];
+
+  return conditions
+    .map((condition) => {
+      if (typeof condition === "string" && CONDITIONS.includes(condition as Condition)) {
+        return {
+          id: `${condition}-${crypto.randomUUID()}`,
+          name: condition as Condition,
+        };
+      }
+
+      if (
+        condition &&
+        typeof condition === "object" &&
+        "name" in condition &&
+        CONDITIONS.includes((condition as { name: Condition }).name)
+      ) {
+        const active = condition as ActiveCondition;
+        const normalized: ActiveCondition = {
+          id: active.id || `${active.name}-${crypto.randomUUID()}`,
+          name: active.name,
+        };
+
+        if (typeof active.rounds === "number" && active.rounds > 0) {
+          normalized.rounds = active.rounds;
+        }
+
+        if (typeof active.expiresOnRound === "number" && active.expiresOnRound > 0) {
+          normalized.expiresOnRound = active.expiresOnRound;
+        }
+
+        return normalized;
+      }
+
+      return null;
+    })
+    .filter((condition): condition is ActiveCondition => Boolean(condition));
 }
 
 export function hiddenHpStatus(hp: number, maxHp: number) {
