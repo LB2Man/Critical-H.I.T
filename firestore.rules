@@ -1,0 +1,68 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function userEmail() {
+      return request.auth.token.email;
+    }
+
+    function room(roomId) {
+      return get(/databases/$(database)/documents/rooms/$(roomId)).data;
+    }
+
+    function isRoomCreator(roomId) {
+      return signedIn() && room(roomId).creatorUid == request.auth.uid;
+    }
+
+    function isRoomMember(roomId) {
+      return signedIn()
+        && (room(roomId).creatorUid == request.auth.uid || userEmail() in room(roomId).invitedEmails);
+    }
+
+    function ownedCombatantEditOnly() {
+      return request.resource.data.diff(resource.data).changedKeys()
+        .hasOnly(['hp', 'ac', 'conditions', 'updatedAt']);
+    }
+
+    match /users/{userId} {
+      allow read: if signedIn();
+      allow create, update: if signedIn()
+        && request.auth.uid == userId
+        && request.resource.data.email == userEmail();
+    }
+
+    match /rooms/{roomId} {
+      allow read: if isRoomMember(roomId);
+      allow create: if signedIn()
+        && request.resource.data.creatorUid == request.auth.uid
+        && request.resource.data.invitedEmails is list
+        && request.resource.data.round == 1;
+      allow update, delete: if isRoomCreator(roomId);
+
+      match /combatants/{combatantId} {
+        allow read: if isRoomMember(roomId);
+        allow create: if isRoomCreator(roomId)
+          || (
+            isRoomMember(roomId)
+            && request.resource.data.ownerUid == request.auth.uid
+            && request.resource.data.ownerEmail == userEmail()
+            && request.resource.data.type == 'player'
+          );
+        allow update: if isRoomCreator(roomId)
+          || (
+            isRoomMember(roomId)
+            && resource.data.ownerUid == request.auth.uid
+            && request.resource.data.ownerUid == resource.data.ownerUid
+            && request.resource.data.ownerEmail == resource.data.ownerEmail
+            && request.resource.data.type == resource.data.type
+            && ownedCombatantEditOnly()
+          );
+        allow delete: if isRoomCreator(roomId);
+      }
+    }
+  }
+}
