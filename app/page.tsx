@@ -750,7 +750,7 @@ function RoomView({ room, user, onBack }: { room: Room; user: User; onBack: () =
     const order = statBlocks.length ? Math.max(...statBlocks.map((item) => item.order ?? 0)) + 1 : 0;
     const statBlockRef = await addDoc(collection(db, "rooms", room.id, "statBlocks"), {
       title: "",
-      body: "# New Stat Block\n\nAC 10\nHP 10\n\n**Abilities**\nAdd abilities here.",
+      body: "AC 10\nHP 10\n\n**Abilities**\nAdd abilities here.",
       order,
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
@@ -1046,7 +1046,7 @@ function RoomView({ room, user, onBack }: { room: Room; user: User; onBack: () =
                 <button className="toggle-button" onClick={() => toggleVisibility("hideAcFromInvitees")}>
                   AC: {room.hideAcFromInvitees ? "Hidden" : "Visible"}
                 </button>
-                <button className="tool-button" onClick={resetRound} disabled={!isCreator}>
+                <button className="tool-button reset-round-button" onClick={resetRound} disabled={!isCreator}>
                   <RotateCcw aria-hidden="true" />
                   Reset Round
                 </button>

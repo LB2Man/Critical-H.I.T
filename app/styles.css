@@ -665,7 +665,7 @@ select:focus {
   background: rgba(16, 11, 11, 0.86);
 }
 
-.tracker-toolbar > .tool-button:last-child {
+.tracker-toolbar > .reset-round-button {
   margin-left: auto;
 }
 
