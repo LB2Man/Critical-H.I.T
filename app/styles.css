@@ -746,9 +746,10 @@ summary {
   left: 0;
   bottom: calc(100% + 0.45rem);
   display: grid;
-  grid-template-columns: minmax(18rem, 1fr) 6rem auto auto;
+  grid-template-columns: 13rem 6rem auto auto;
   gap: 0.5rem;
-  width: min(44rem, 78vw);
+  width: max-content;
+  max-width: 78vw;
   max-height: none;
   overflow: visible;
   margin-top: 0;
@@ -765,7 +766,7 @@ summary {
   left: 0;
   z-index: 120;
   display: grid;
-  width: min(18rem, 72vw);
+  width: 100%;
   max-height: 17rem;
   overflow: auto;
   border: 1px solid var(--line);
