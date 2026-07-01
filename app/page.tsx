@@ -1377,8 +1377,12 @@ function StatBlockModal({
               <>
                 <h2 id="stat-block-title">{draftTitle || "Name"}</h2>
                 <div className="stat-block-core-summary">
-                  <span>AC {draftAc}</span>
-                  <span>HP {draftHp}</span>
+                  <span>
+                    <span className="stat-label">AC</span> {draftAc}
+                  </span>
+                  <span>
+                    <span className="stat-label">HP</span> {draftHp}
+                  </span>
                 </div>
               </>
             )}
@@ -1928,8 +1932,12 @@ function ReadOnlyStatBlockModal({ statBlock, onClose }: { statBlock: StatBlock; 
           <div className="stat-block-title-area">
             <h2 id="readonly-stat-block-title">{statBlock.title || "Name"}</h2>
             <div className="stat-block-core-summary">
-              <span>AC {statBlock.ac ?? 10}</span>
-              <span>HP {statBlock.hp ?? 10}</span>
+              <span>
+                <span className="stat-label">AC</span> {statBlock.ac ?? 10}
+              </span>
+              <span>
+                <span className="stat-label">HP</span> {statBlock.hp ?? 10}
+              </span>
             </div>
           </div>
           <div className="stat-block-modal-actions">
