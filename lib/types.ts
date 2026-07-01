@@ -61,6 +61,13 @@ export type Combatant = {
   order: number;
 };
 
+export type StatBlock = {
+  id: string;
+  title: string;
+  body: string;
+  order?: number;
+};
+
 export function conditionLabel(condition: Condition) {
   return condition
     .split("-")

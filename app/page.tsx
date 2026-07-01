@@ -59,6 +59,7 @@ import {
   ActiveCondition,
   HpVisibility,
   Room,
+  StatBlock,
   CONDITIONS,
   activeConditionLabel,
   conditionLabel,
@@ -67,7 +68,7 @@ import {
 } from "../lib/types";
 
 type View = "rooms" | "room";
-type RoomTab = "initiative" | "invite";
+type RoomTab = "initiative" | "invite" | "statBlocks";
 
 export default function Home() {
   const [user, setUser] = useState<User | null>(null);
@@ -255,8 +256,10 @@ export default function Home() {
     if (!user) return;
 
     const combatants = await getDocs(collection(db, "rooms", roomId, "combatants"));
+    const statBlocks = await getDocs(collection(db, "rooms", roomId, "statBlocks"));
     const batch = writeBatch(db);
     combatants.docs.forEach((combatant) => batch.delete(combatant.ref));
+    statBlocks.docs.forEach((statBlock) => batch.delete(statBlock.ref));
     batch.delete(doc(db, "rooms", roomId));
     await batch.commit();
 
@@ -650,8 +653,11 @@ function D20Icon() {
 function RoomView({ room, user, onBack }: { room: Room; user: User; onBack: () => void }) {
   const isCreator = room.creatorUid === user.uid;
   const [combatants, setCombatants] = useState<Combatant[]>([]);
+  const [statBlocks, setStatBlocks] = useState<StatBlock[]>([]);
   const [inviteEmail, setInviteEmail] = useState("");
   const [activeTab, setActiveTab] = useState<RoomTab>("initiative");
+  const [activeStatBlockId, setActiveStatBlockId] = useState<string | null>(null);
+  const [deleteStatBlockId, setDeleteStatBlockId] = useState<string | null>(null);
 
   useEffect(() => {
     const combatantsQuery = query(
@@ -664,8 +670,32 @@ function RoomView({ room, user, onBack }: { room: Room; user: User; onBack: () =
     });
   }, [room.id]);
 
+  useEffect(() => {
+    if (!isCreator) {
+      setStatBlocks([]);
+      return;
+    }
+
+    const statBlocksQuery = query(collection(db, "rooms", room.id, "statBlocks"));
+
+    return onSnapshot(statBlocksQuery, (snapshot) => {
+      setStatBlocks(
+        snapshot.docs
+          .map((item) => ({ id: item.id, ...item.data() }) as StatBlock)
+          .sort((a, b) => {
+            const aOrder = typeof a.order === "number" ? a.order : null;
+            const bOrder = typeof b.order === "number" ? b.order : null;
+            if (aOrder !== null && bOrder !== null) return aOrder - bOrder;
+            if (aOrder !== null) return -1;
+            if (bOrder !== null) return 1;
+            return a.title.localeCompare(b.title);
+          }),
+      );
+    });
+  }, [isCreator, room.id]);
+
   const sensors = useSensors(
-    useSensor(PointerSensor),
+    useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
   );
 
@@ -713,6 +743,34 @@ function RoomView({ room, user, onBack }: { room: Room; user: User; onBack: () =
         updatedAt: serverTimestamp(),
       });
     }
+  }
+
+  async function addStatBlock() {
+    if (!isCreator) return;
+    const order = statBlocks.length ? Math.max(...statBlocks.map((item) => item.order ?? 0)) + 1 : 0;
+    const statBlockRef = await addDoc(collection(db, "rooms", room.id, "statBlocks"), {
+      title: "",
+      body: "# New Stat Block\n\nAC 10\nHP 10\n\n**Abilities**\nAdd abilities here.",
+      order,
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    });
+    setActiveStatBlockId(statBlockRef.id);
+  }
+
+  async function updateStatBlock(id: string, patch: Partial<StatBlock>) {
+    if (!isCreator) return;
+    await updateDoc(doc(db, "rooms", room.id, "statBlocks", id), {
+      ...patch,
+      updatedAt: serverTimestamp(),
+    });
+  }
+
+  async function removeStatBlock(id: string) {
+    if (!isCreator) return;
+    await deleteDoc(doc(db, "rooms", room.id, "statBlocks", id));
+    if (activeStatBlockId === id) setActiveStatBlockId(null);
+    setDeleteStatBlockId(null);
   }
 
   async function updateCombatant(id: string, patch: Partial<Combatant>) {
@@ -837,6 +895,29 @@ function RoomView({ room, user, onBack }: { room: Room; user: User; onBack: () =
     await batch.commit();
   }
 
+  async function handleStatBlockDragEnd(event: DragEndEvent) {
+    if (!isCreator) return;
+
+    const { active, over } = event;
+    if (!over || active.id === over.id) return;
+
+    const oldIndex = statBlocks.findIndex((statBlock) => statBlock.id === active.id);
+    const newIndex = statBlocks.findIndex((statBlock) => statBlock.id === over.id);
+    if (oldIndex < 0 || newIndex < 0) return;
+
+    const reordered = arrayMove(statBlocks, oldIndex, newIndex);
+    const batch = writeBatch(db);
+
+    reordered.forEach((statBlock, index) => {
+      batch.update(doc(db, "rooms", room.id, "statBlocks", statBlock.id), {
+        order: index,
+        updatedAt: serverTimestamp(),
+      });
+    });
+
+    await batch.commit();
+  }
+
   async function toggleVisibility(field: HpVisibility) {
     if (!isCreator) return;
     await updateDoc(doc(db, "rooms", room.id), {
@@ -880,6 +961,14 @@ function RoomView({ room, user, onBack }: { room: Room; user: User; onBack: () =
         >
           Initiative
         </button>
+        {isCreator && (
+          <button
+            className={`tab${activeTab === "statBlocks" ? " active" : ""}`}
+            onClick={() => setActiveTab("statBlocks")}
+          >
+            Stat Blocks
+          </button>
+        )}
       </nav>
 
       {activeTab === "invite" && isCreator ? (
@@ -915,6 +1004,21 @@ function RoomView({ room, user, onBack }: { room: Room; user: User; onBack: () =
             )}
           </div>
         </section>
+      ) : activeTab === "statBlocks" && isCreator ? (
+        <StatBlocksTab
+          statBlocks={statBlocks}
+          activeStatBlockId={activeStatBlockId}
+          deleteStatBlockId={deleteStatBlockId}
+          sensors={sensors}
+          onAdd={addStatBlock}
+          onOpen={setActiveStatBlockId}
+          onClose={() => setActiveStatBlockId(null)}
+          onUpdate={updateStatBlock}
+          onRequestDelete={setDeleteStatBlockId}
+          onCancelDelete={() => setDeleteStatBlockId(null)}
+          onDelete={removeStatBlock}
+          onDragEnd={handleStatBlockDragEnd}
+        />
       ) : (
         <div className="initiative-tab">
           <div className="tracker-toolbar">
@@ -972,6 +1076,7 @@ function RoomView({ room, user, onBack }: { room: Room; user: User; onBack: () =
                       canEdit={isCreator || combatant.ownerUid === user.uid}
                       canDrag={isCreator}
                       currentUserId={user.uid}
+                      statBlockTitles={isCreator ? statBlocks.map((statBlock) => statBlock.title).filter(Boolean) : []}
                       hideHp={!isCreator && combatant.ownerUid !== user.uid && room.hideHpFromInvitees}
                       hideAc={!isCreator && combatant.ownerUid !== user.uid && room.hideAcFromInvitees}
                       onUpdate={(patch) => updateCombatant(combatant.id, patch)}
@@ -989,6 +1094,291 @@ function RoomView({ room, user, onBack }: { room: Room; user: User; onBack: () =
   );
 }
 
+function StatBlocksTab({
+  statBlocks,
+  activeStatBlockId,
+  deleteStatBlockId,
+  sensors,
+  onAdd,
+  onOpen,
+  onClose,
+  onUpdate,
+  onRequestDelete,
+  onCancelDelete,
+  onDelete,
+  onDragEnd,
+}: {
+  statBlocks: StatBlock[];
+  activeStatBlockId: string | null;
+  deleteStatBlockId: string | null;
+  sensors: ReturnType<typeof useSensors>;
+  onAdd: () => void;
+  onOpen: (id: string) => void;
+  onClose: () => void;
+  onUpdate: (id: string, patch: Partial<StatBlock>) => void;
+  onRequestDelete: (id: string) => void;
+  onCancelDelete: () => void;
+  onDelete: (id: string) => void;
+  onDragEnd: (event: DragEndEvent) => void;
+}) {
+  const activeStatBlock = statBlocks.find((statBlock) => statBlock.id === activeStatBlockId) || null;
+  const deleteStatBlock = statBlocks.find((statBlock) => statBlock.id === deleteStatBlockId) || null;
+
+  return (
+    <section className="stat-blocks-tab">
+      <div className="stat-block-toolbar">
+        <button className="tool-button" onClick={onAdd}>
+          <Plus aria-hidden="true" />
+          Add
+        </button>
+      </div>
+
+      <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onDragEnd}>
+        <SortableContext items={statBlocks.map((statBlock) => statBlock.id)} strategy={rectSortingStrategy}>
+          <div className="stat-block-grid">
+            {statBlocks.map((statBlock) => (
+              <StatBlockCard
+                key={statBlock.id}
+                statBlock={statBlock}
+                onOpen={onOpen}
+                onRequestDelete={onRequestDelete}
+              />
+            ))}
+            {statBlocks.length === 0 && <div className="empty-state">No stat blocks yet.</div>}
+          </div>
+        </SortableContext>
+      </DndContext>
+
+      {activeStatBlock && (
+        <StatBlockModal statBlock={activeStatBlock} onClose={onClose} onUpdate={onUpdate} />
+      )}
+
+      {deleteStatBlock && (
+        <div className="modal-backdrop" role="presentation">
+          <div className="confirm-modal" role="dialog" aria-modal="true" aria-labelledby="delete-stat-block-title">
+            <h2 id="delete-stat-block-title">Delete stat block?</h2>
+            <p>This will remove {deleteStatBlock.title || "this stat block"}.</p>
+            <div className="confirm-actions">
+              <button className="subtle-button" onClick={onCancelDelete}>
+                Cancel
+              </button>
+              <button className="tool-button danger" onClick={() => onDelete(deleteStatBlock.id)}>
+                Delete
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </section>
+  );
+}
+
+function StatBlockCard({
+  statBlock,
+  onOpen,
+  onRequestDelete,
+}: {
+  statBlock: StatBlock;
+  onOpen: (id: string) => void;
+  onRequestDelete: (id: string) => void;
+}) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
+    id: statBlock.id,
+  });
+
+  const stopCardGesture = (event: React.SyntheticEvent) => {
+    event.stopPropagation();
+  };
+
+  return (
+    <div
+      ref={setNodeRef}
+      className={`stat-block-card${isDragging ? " dragging" : ""}`}
+      style={{
+        transform: CSS.Transform.toString(transform),
+        transition,
+      }}
+      onClick={() => onOpen(statBlock.id)}
+      onKeyDown={(event) => {
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          onOpen(statBlock.id);
+        }
+      }}
+      {...attributes}
+      {...listeners}
+    >
+      <div className="stat-block-card-top">
+        <MonsterIcon />
+        <button
+          className="icon-button danger"
+          title="Delete stat block"
+          onPointerDown={stopCardGesture}
+          onKeyDown={stopCardGesture}
+          onClick={(event) => {
+            event.stopPropagation();
+            onRequestDelete(statBlock.id);
+          }}
+        >
+          <Trash2 aria-hidden="true" />
+        </button>
+      </div>
+      <span>{statBlock.title || "Name"}</span>
+    </div>
+  );
+}
+
+function MonsterIcon() {
+  return (
+    <svg className="monster-icon" viewBox="0 0 64 64" aria-hidden="true" focusable="false">
+      <path d="M12 29 21 13l11 9 11-9 9 16-5 22H17Z" />
+      <path d="M20 31h9" />
+      <path d="M35 31h9" />
+      <path d="M24 44h16" />
+      <path d="M17 51 8 58" />
+      <path d="M47 51l9 7" />
+    </svg>
+  );
+}
+
+function StatBlockModal({
+  statBlock,
+  onClose,
+  onUpdate,
+}: {
+  statBlock: StatBlock;
+  onClose: () => void;
+  onUpdate: (id: string, patch: Partial<StatBlock>) => void;
+}) {
+  const [draftTitle, setDraftTitle] = useState(statBlock.title);
+  const [draftBody, setDraftBody] = useState(statBlock.body);
+  const [editing, setEditing] = useState(!statBlock.title && !statBlock.body);
+
+  useEffect(() => {
+    setDraftTitle(statBlock.title);
+    setDraftBody(statBlock.body);
+    setEditing(!statBlock.title && !statBlock.body);
+  }, [statBlock.id, statBlock.title, statBlock.body]);
+
+  function saveStatBlock() {
+    onUpdate(statBlock.id, {
+      title: draftTitle.trim(),
+      body: draftBody,
+    });
+    setEditing(false);
+  }
+
+  return (
+    <div className="modal-backdrop" role="presentation">
+      <div className="stat-block-modal" role="dialog" aria-modal="true" aria-labelledby="stat-block-title">
+        <div className="stat-block-modal-header">
+          {editing ? (
+            <input
+              id="stat-block-title"
+              value={draftTitle}
+              onChange={(event) => setDraftTitle(event.target.value)}
+              placeholder="Name"
+              aria-label="Stat block title"
+            />
+          ) : (
+            <h2 id="stat-block-title">{draftTitle || "Name"}</h2>
+          )}
+          <div className="stat-block-modal-actions">
+            {editing ? (
+              <button className="tool-button" onClick={saveStatBlock}>
+                Save
+              </button>
+            ) : (
+              <button className="tool-button" onClick={() => setEditing(true)}>
+                Edit
+              </button>
+            )}
+            <button className="subtle-button" onClick={onClose}>
+              Close
+            </button>
+          </div>
+        </div>
+        {editing ? (
+          <div className="stat-block-editor">
+            <textarea
+              value={draftBody}
+              onChange={(event) => setDraftBody(event.target.value)}
+              aria-label="Stat block text"
+            />
+            <div className="stat-block-preview">
+              <RenderedStatBlock text={draftBody} />
+            </div>
+          </div>
+        ) : (
+          <div className="stat-block-preview stat-block-preview-only">
+            <RenderedStatBlock text={draftBody} />
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function RenderedStatBlock({ text }: { text: string }) {
+  const lines = text.split(/\r?\n/);
+
+  return (
+    <div className="stat-block-rendered">
+      {lines.map((line, index) => {
+        const heading = /^(#{1,6})\s+(.+)$/.exec(line);
+
+        if (heading) {
+          const level = heading[1].length;
+          const HeadingTag = `h${level}` as keyof React.JSX.IntrinsicElements;
+          return (
+            <HeadingTag key={`${line}-${index}`}>
+              {renderInlineStatText(heading[2])}
+            </HeadingTag>
+          );
+        }
+
+        if (line.trim() === "---") {
+          return <hr key={`rule-${index}`} />;
+        }
+
+        if (!line.trim()) {
+          return <br key={`break-${index}`} />;
+        }
+
+        return <p key={`${line}-${index}`}>{renderInlineStatText(line)}</p>;
+      })}
+    </div>
+  );
+}
+
+function renderInlineStatText(text: string) {
+  const parts: React.ReactNode[] = [];
+  const pattern = /(\*\*.+?\*\*|\*.+?\*)/g;
+  let lastIndex = 0;
+  let match: RegExpExecArray | null;
+
+  while ((match = pattern.exec(text))) {
+    if (match.index > lastIndex) {
+      parts.push(text.slice(lastIndex, match.index));
+    }
+
+    const token = match[0];
+    if (token.startsWith("**")) {
+      parts.push(<strong key={`${token}-${match.index}`}>{token.slice(2, -2)}</strong>);
+    } else {
+      parts.push(<em key={`${token}-${match.index}`}>{token.slice(1, -1)}</em>);
+    }
+
+    lastIndex = match.index + token.length;
+  }
+
+  if (lastIndex < text.length) {
+    parts.push(text.slice(lastIndex));
+  }
+
+  return parts;
+}
+
 function CombatantRow({
   combatant,
   round,
@@ -997,6 +1387,7 @@ function CombatantRow({
   canEdit,
   canDrag,
   currentUserId,
+  statBlockTitles,
   hideHp,
   hideAc,
   onUpdate,
@@ -1009,6 +1400,7 @@ function CombatantRow({
   canEdit: boolean;
   canDrag: boolean;
   currentUserId: string;
+  statBlockTitles: string[];
   hideHp: boolean;
   hideAc: boolean;
   onUpdate: (patch: Partial<Combatant>) => void;
@@ -1018,6 +1410,7 @@ function CombatantRow({
   const [conditionInput, setConditionInput] = useState("");
   const [conditionRounds, setConditionRounds] = useState("");
   const [hpActionAmount, setHpActionAmount] = useState("");
+  const [nameFocused, setNameFocused] = useState(false);
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: combatant.id,
     disabled: !canDrag,
@@ -1036,6 +1429,12 @@ function CombatantRow({
   const conditionSuggestions = CONDITIONS.filter((condition) =>
     conditionLabel(condition).toLowerCase().includes(conditionInput.trim().toLowerCase()),
   );
+  const statBlockNameSuggestions =
+    nameFocused && combatant.name.trim()
+      ? statBlockTitles
+          .filter((title) => title.toLowerCase().includes(combatant.name.trim().toLowerCase()))
+          .slice(0, 6)
+      : [];
 
   function addCondition(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -1143,14 +1542,35 @@ function CombatantRow({
         />
       </label>
       <div className="combatant-main">
-        <input
-          className="name-input"
-          value={combatant.name}
-          placeholder="Name"
-          disabled={!canManage}
-          onChange={(event) => onUpdate({ name: event.target.value })}
-          aria-label="Combatant name"
-        />
+        <div className="name-combobox">
+          <input
+            className="name-input"
+            value={combatant.name}
+            placeholder="Name"
+            disabled={!canManage}
+            onFocus={() => setNameFocused(true)}
+            onBlur={() => window.setTimeout(() => setNameFocused(false), 120)}
+            onChange={(event) => onUpdate({ name: event.target.value })}
+            aria-label="Combatant name"
+          />
+          {statBlockNameSuggestions.length > 0 && (
+            <div className="name-suggestions">
+              {statBlockNameSuggestions.map((title) => (
+                <button
+                  key={title}
+                  type="button"
+                  onMouseDown={(event) => event.preventDefault()}
+                  onClick={() => {
+                    onUpdate({ name: title });
+                    setNameFocused(false);
+                  }}
+                >
+                  {title}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
         <div className="condition-tags">
           {conditions.map((condition) => (
             <button

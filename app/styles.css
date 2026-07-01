@@ -339,6 +339,97 @@ select:focus {
   flex-wrap: wrap;
 }
 
+.stat-blocks-tab {
+  display: grid;
+  gap: 1rem;
+}
+
+.stat-block-toolbar {
+  display: flex;
+  padding: 0.85rem;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: rgba(16, 11, 11, 0.86);
+}
+
+.stat-block-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 0.8rem;
+}
+
+.stat-block-card {
+  display: grid;
+  gap: 0.45rem;
+  min-height: 8rem;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: rgba(21, 16, 16, 0.86);
+  color: var(--text);
+  padding: 1rem;
+  text-align: left;
+  cursor: grab;
+  transform-origin: center;
+  will-change: transform;
+  transition:
+    transform 180ms ease,
+    box-shadow 180ms ease,
+    opacity 180ms ease,
+    border-color 180ms ease,
+    background-color 180ms ease;
+}
+
+.stat-block-card:active {
+  cursor: grabbing;
+}
+
+.stat-block-card.dragging {
+  z-index: 5;
+  opacity: 0.92;
+  border-color: var(--red-bright);
+  background: rgba(31, 13, 15, 0.96);
+  transition:
+    box-shadow 120ms ease,
+    opacity 120ms ease,
+    border-color 120ms ease,
+    background-color 120ms ease,
+    scale 120ms ease;
+  box-shadow:
+    0 1rem 2.25rem rgba(0, 0, 0, 0.45),
+    0 0 1.15rem rgba(241, 57, 70, 0.28);
+  scale: 1.025;
+}
+
+.stat-block-card-top {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+}
+
+.stat-block-card-top .icon-button {
+  margin-left: auto;
+}
+
+.stat-block-card span {
+  font-size: 1.25rem;
+  font-weight: 700;
+}
+
+.stat-block-card small {
+  color: var(--muted);
+}
+
+.monster-icon {
+  width: 2.25rem;
+  height: 2.25rem;
+  fill: rgba(241, 57, 70, 0.94);
+  stroke: #130707;
+  stroke-width: 3;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  filter: drop-shadow(0 0 0.35rem rgba(241, 57, 70, 0.18));
+}
+
 .modal-backdrop {
   position: fixed;
   inset: 0;
@@ -378,6 +469,167 @@ select:focus {
   justify-content: flex-end;
   gap: 0.6rem;
   margin-top: 1rem;
+}
+
+.stat-block-modal {
+  width: min(68rem, 100%);
+  min-width: min(34rem, 100%);
+  min-height: 24rem;
+  max-height: min(46rem, calc(100vh - 2rem));
+  display: grid;
+  gap: 0.85rem;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #130d0d;
+  box-shadow: 0 1rem 3rem var(--shadow);
+  padding: 1rem;
+  overflow: auto;
+  resize: both;
+  scrollbar-color: var(--red) #0c0909;
+}
+
+.stat-block-modal-header {
+  display: flex;
+  gap: 0.75rem;
+  align-items: center;
+}
+
+.stat-block-modal-header input,
+.stat-block-modal-header h2 {
+  flex: 1 1 auto;
+  color: var(--gold);
+  font-size: 1.4rem;
+  font-weight: 700;
+}
+
+.stat-block-modal-header h2 {
+  margin: 0;
+}
+
+.stat-block-modal-actions {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.stat-block-editor {
+  display: grid;
+  grid-template-columns: minmax(18rem, 1fr) minmax(18rem, 1fr);
+  gap: 0.85rem;
+  min-height: 28rem;
+  overflow: hidden;
+}
+
+.stat-block-editor textarea,
+.stat-block-preview {
+  min-height: 28rem;
+  max-height: min(34rem, calc(100vh - 12rem));
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #0c0909;
+  color: var(--text);
+  padding: 0.85rem;
+  scrollbar-color: var(--red) #0c0909;
+}
+
+.stat-block-editor textarea {
+  resize: none;
+  outline: none;
+}
+
+.stat-block-preview {
+  overflow: auto;
+}
+
+.stat-block-preview-only {
+  min-height: 28rem;
+  max-height: none;
+}
+
+.stat-block-rendered {
+  display: grid;
+  gap: 0.45rem;
+}
+
+.stat-block-rendered h1,
+.stat-block-rendered h2,
+.stat-block-rendered h3,
+.stat-block-rendered h4,
+.stat-block-rendered h5,
+.stat-block-rendered h6,
+.stat-block-rendered p {
+  margin: 0;
+}
+
+.stat-block-rendered h1,
+.stat-block-rendered h2,
+.stat-block-rendered h3,
+.stat-block-rendered h4,
+.stat-block-rendered h5,
+.stat-block-rendered h6 {
+  color: var(--gold);
+}
+
+.stat-block-rendered h1 {
+  font-size: 1.65rem;
+}
+
+.stat-block-rendered h2 {
+  font-size: 1.45rem;
+}
+
+.stat-block-rendered h3 {
+  font-size: 1.25rem;
+}
+
+.stat-block-rendered h4 {
+  font-size: 1.08rem;
+}
+
+.stat-block-rendered h5,
+.stat-block-rendered h6 {
+  font-size: 0.96rem;
+}
+
+.stat-block-rendered hr {
+  width: 100%;
+  border: 0;
+  border-top: 1px solid var(--red);
+  margin: 0.55rem 0;
+}
+
+.stat-block-rendered strong {
+  color: #ffd3d6;
+}
+
+.stat-block-rendered em {
+  color: var(--muted);
+}
+
+.stat-block-modal::-webkit-scrollbar,
+.stat-block-editor textarea::-webkit-scrollbar,
+.stat-block-preview::-webkit-scrollbar {
+  width: 0.65rem;
+  height: 0.65rem;
+}
+
+.stat-block-modal::-webkit-scrollbar-track,
+.stat-block-editor textarea::-webkit-scrollbar-track,
+.stat-block-preview::-webkit-scrollbar-track {
+  background: #0c0909;
+}
+
+.stat-block-modal::-webkit-scrollbar-thumb,
+.stat-block-editor textarea::-webkit-scrollbar-thumb,
+.stat-block-preview::-webkit-scrollbar-thumb {
+  border: 2px solid #0c0909;
+  border-radius: 999px;
+  background: var(--red);
+}
+
+.stat-block-modal::-webkit-resizer,
+.stat-block-editor textarea::-webkit-resizer {
+  background: linear-gradient(135deg, transparent 45%, var(--red) 46%, var(--red) 60%, transparent 61%);
 }
 
 .room-header {
@@ -733,6 +985,49 @@ summary {
   box-shadow: none;
 }
 
+.name-combobox {
+  position: relative;
+  width: min(22rem, 100%);
+}
+
+.name-combobox .name-input {
+  width: 100%;
+}
+
+.name-suggestions {
+  position: absolute;
+  top: calc(100% + 0.35rem);
+  left: 0;
+  z-index: 90;
+  display: grid;
+  width: 100%;
+  max-height: 14rem;
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #130d0d;
+  box-shadow: 0 1rem 2rem var(--shadow);
+  padding: 0.35rem;
+}
+
+.name-suggestions button {
+  display: flex;
+  align-items: center;
+  min-height: 2.25rem;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text);
+  padding: 0.45rem 0.6rem;
+  text-align: left;
+}
+
+.name-suggestions button:hover,
+.name-suggestions button:focus {
+  background: rgba(181, 22, 37, 0.28);
+  color: var(--gold);
+}
+
 .add-condition-wrap {
   position: relative;
 }
@@ -872,14 +1167,21 @@ summary {
     grid-template-columns: 1fr;
     width: min(18rem, 82vw);
   }
+
+  .stat-block-editor {
+    grid-template-columns: 1fr;
+    overflow: auto;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .room-card {
+  .room-card,
+  .stat-block-card {
     transition: none;
   }
 
-  .room-card.dragging {
+  .room-card.dragging,
+  .stat-block-card.dragging {
     scale: 1;
   }
 }
