@@ -755,6 +755,44 @@ summary {
   padding: 0.65rem;
 }
 
+.condition-combobox {
+  position: relative;
+}
+
+.condition-suggestions {
+  position: absolute;
+  top: calc(100% + 0.35rem);
+  left: 0;
+  z-index: 120;
+  display: grid;
+  width: min(18rem, 72vw);
+  max-height: 17rem;
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #130d0d;
+  box-shadow: 0 1rem 2rem var(--shadow);
+  padding: 0.35rem;
+}
+
+.condition-suggestions button {
+  display: flex;
+  align-items: center;
+  min-height: 2.25rem;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text);
+  padding: 0.45rem 0.6rem;
+  text-align: left;
+}
+
+.condition-suggestions button:hover,
+.condition-suggestions button:focus {
+  background: rgba(181, 22, 37, 0.28);
+  color: var(--gold);
+}
+
 .condition-chip,
 .no-conditions {
   border: 1px solid #5d2a2d;

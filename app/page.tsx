@@ -1031,6 +1031,9 @@ function CombatantRow({
   const concentrationPrompt = combatant.concentrationPrompt ?? null;
   const shouldShowConcentrationPrompt =
     Boolean(concentrationPrompt) && concentrationPrompt?.ownerUid === currentUserId;
+  const conditionSuggestions = CONDITIONS.filter((condition) =>
+    conditionLabel(condition).toLowerCase().includes(conditionInput.trim().toLowerCase()),
+  );
 
   function addCondition(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -1164,21 +1167,29 @@ function CombatantRow({
           )}
           {addingCondition && (
             <form className="condition-menu" onSubmit={addCondition}>
-              <input
-                type="text"
-                list={`conditions-${combatant.id}`}
-                value={conditionInput}
-                onChange={(event) => setConditionInput(event.target.value)}
-                placeholder="Condition"
-                aria-label="Condition"
-              />
-              <datalist id={`conditions-${combatant.id}`}>
-                {CONDITIONS.map((condition) => (
-                  <option key={condition} value={conditionLabel(condition)}>
-                    {conditionLabel(condition)}
-                  </option>
-                ))}
-              </datalist>
+              <div className="condition-combobox">
+                <input
+                  type="text"
+                  value={conditionInput}
+                  onChange={(event) => setConditionInput(event.target.value)}
+                  placeholder="Condition"
+                  aria-label="Condition"
+                  autoComplete="off"
+                />
+                {conditionSuggestions.length > 0 && (
+                  <div className="condition-suggestions">
+                    {conditionSuggestions.map((condition) => (
+                      <button
+                        key={condition}
+                        type="button"
+                        onClick={() => setConditionInput(conditionLabel(condition))}
+                      >
+                        {conditionLabel(condition)}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
               <input
                 type="number"
                 min="1"
