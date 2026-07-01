@@ -747,6 +747,12 @@ function RoomView({ room, user, onBack }: { room: Room; user: User; onBack: () =
 
   async function addStatBlock() {
     if (!isCreator) return;
+    const existingDraft = statBlocks.find((statBlock) => !statBlock.title.trim());
+    if (existingDraft) {
+      setActiveStatBlockId(existingDraft.id);
+      return;
+    }
+
     const order = statBlocks.length ? Math.max(...statBlocks.map((item) => item.order ?? 0)) + 1 : 0;
     const statBlockRef = await addDoc(collection(db, "rooms", room.id, "statBlocks"), {
       title: "",
@@ -1150,7 +1156,12 @@ function StatBlocksTab({
       </DndContext>
 
       {activeStatBlock && (
-        <StatBlockModal statBlock={activeStatBlock} onClose={onClose} onUpdate={onUpdate} />
+        <StatBlockModal
+          statBlock={activeStatBlock}
+          statBlocks={statBlocks}
+          onClose={onClose}
+          onUpdate={onUpdate}
+        />
       )}
 
       {deleteStatBlock && (
@@ -1241,42 +1252,89 @@ function MonsterIcon() {
   );
 }
 
+function normalizeStatBlockTitle(title: string) {
+  return title.trim().replace(/\s+/g, " ").toLowerCase();
+}
+
 function StatBlockModal({
   statBlock,
+  statBlocks,
   onClose,
   onUpdate,
 }: {
   statBlock: StatBlock;
+  statBlocks: StatBlock[];
   onClose: () => void;
   onUpdate: (id: string, patch: Partial<StatBlock>) => void;
 }) {
   const [draftTitle, setDraftTitle] = useState(statBlock.title);
   const [draftBody, setDraftBody] = useState(statBlock.body);
   const [editing, setEditing] = useState(!statBlock.title && !statBlock.body);
+  const [confirmDiscard, setConfirmDiscard] = useState(false);
+  const [titleError, setTitleError] = useState("");
 
   useEffect(() => {
     setDraftTitle(statBlock.title);
     setDraftBody(statBlock.body);
     setEditing(!statBlock.title && !statBlock.body);
+    setConfirmDiscard(false);
+    setTitleError("");
   }, [statBlock.id, statBlock.title, statBlock.body]);
 
+  const hasUnsavedChanges = draftTitle !== statBlock.title || draftBody !== statBlock.body;
+
   function saveStatBlock() {
+    const normalizedTitle = normalizeStatBlockTitle(draftTitle);
+    const duplicate = statBlocks.some(
+      (item) => item.id !== statBlock.id && normalizeStatBlockTitle(item.title) === normalizedTitle,
+    );
+
+    if (!normalizedTitle) {
+      setTitleError("Please give this stat block a name.");
+      return;
+    }
+
+    if (duplicate) {
+      setTitleError("A stat block with this name already exists.");
+      return;
+    }
+
     onUpdate(statBlock.id, {
       title: draftTitle.trim(),
       body: draftBody,
     });
     setEditing(false);
+    setConfirmDiscard(false);
+    setTitleError("");
+  }
+
+  function requestClose() {
+    if (editing && hasUnsavedChanges) {
+      setConfirmDiscard(true);
+      return;
+    }
+
+    onClose();
   }
 
   return (
-    <div className="modal-backdrop" role="presentation">
-      <div className="stat-block-modal" role="dialog" aria-modal="true" aria-labelledby="stat-block-title">
+    <div className="modal-backdrop" role="presentation" onClick={requestClose}>
+      <div
+        className="stat-block-modal"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="stat-block-title"
+        onClick={(event) => event.stopPropagation()}
+      >
         <div className="stat-block-modal-header">
           {editing ? (
             <input
               id="stat-block-title"
               value={draftTitle}
-              onChange={(event) => setDraftTitle(event.target.value)}
+              onChange={(event) => {
+                setDraftTitle(event.target.value);
+                setTitleError("");
+              }}
               placeholder="Name"
               aria-label="Stat block title"
             />
@@ -1293,11 +1351,12 @@ function StatBlockModal({
                 Edit
               </button>
             )}
-            <button className="subtle-button" onClick={onClose}>
+            <button className="subtle-button" onClick={requestClose}>
               Close
             </button>
           </div>
         </div>
+        {titleError && <p className="field-error">{titleError}</p>}
         {editing ? (
           <div className="stat-block-editor">
             <textarea
@@ -1315,6 +1374,22 @@ function StatBlockModal({
           </div>
         )}
       </div>
+      {confirmDiscard && (
+        <div className="modal-backdrop nested-modal" role="presentation" onClick={(event) => event.stopPropagation()}>
+          <div className="confirm-modal" role="dialog" aria-modal="true" aria-labelledby="discard-stat-block-title">
+            <h2 id="discard-stat-block-title">Close without saving?</h2>
+            <p>Your changes will be lost if you close this stat block now.</p>
+            <div className="confirm-actions">
+              <button className="subtle-button" onClick={() => setConfirmDiscard(false)}>
+                Cancel
+              </button>
+              <button className="tool-button danger" onClick={onClose}>
+                Close Without Saving
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

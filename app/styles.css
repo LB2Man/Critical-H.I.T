@@ -440,6 +440,10 @@ select:focus {
   padding: 1rem;
 }
 
+.nested-modal {
+  z-index: 260;
+}
+
 .confirm-modal {
   width: min(24rem, 100%);
   border: 1px solid var(--line);
@@ -510,6 +514,12 @@ select:focus {
   display: flex;
   gap: 0.5rem;
   align-items: center;
+}
+
+.field-error {
+  margin: -0.35rem 0 0;
+  color: #ff8b93;
+  font-size: 0.9rem;
 }
 
 .stat-block-editor {
