@@ -973,6 +973,14 @@ function RoomView({ room, user, onBack }: { room: Room; user: User; onBack: () =
             Stat Blocks
           </button>
         )}
+        <button
+          className="tab"
+          onClick={() => {
+            window.open("https://nexusmd.vercel.app/dashboard", "_blank", "noopener,noreferrer");
+          }}
+        >
+          Nexus Notes
+        </button>
       </nav>
 
       {activeTab === "invite" && isCreator ? (
