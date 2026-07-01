@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import "./styles.css";
 
 export const metadata: Metadata = {
-  title: "Critical H.I.T",
+  title: "Critical HIT",
   description: "A Dungeons and Dragons DM and Player Tool",
 };
 

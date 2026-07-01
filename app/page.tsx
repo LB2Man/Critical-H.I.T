@@ -321,7 +321,7 @@ export default function Home() {
   }
 
   if (authLoading) {
-    return <Shell title="Critical H.I.T" subtitle="Opening the war room..." />;
+    return <Shell title="Critical HIT" subtitle="Opening the war room..." />;
   }
 
   if (!user) {
@@ -333,7 +333,7 @@ export default function Home() {
       <header className="topbar">
         <button className="brand" onClick={() => setView("rooms")}>
           <Skull aria-hidden="true" />
-          <span>Critical H.I.T</span>
+          <span>Critical HIT</span>
         </button>
         <div className="profile">
           <span>{user.displayName || user.email}</span>
@@ -407,7 +407,7 @@ function SignInScreen({ onSignIn }: { onSignIn: () => void }) {
       <div className="sigil">
         <Skull aria-hidden="true" />
       </div>
-      <h1>Critical H.I.T</h1>
+      <h1>Critical HIT</h1>
       <p>Sign in with Google to enter your campaigns.</p>
       <button className="primary-action" onClick={onSignIn}>
         <Shield aria-hidden="true" />
