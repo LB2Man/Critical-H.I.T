@@ -1282,15 +1282,15 @@ function useResizableStatBlockModal() {
     if (!modal) return;
 
     event.currentTarget.setPointerCapture(event.pointerId);
+    const resizeHandle = event.currentTarget;
     const rect = modal.getBoundingClientRect();
     const startX = event.clientX;
     const startY = event.clientY;
-    const availableWidth = Math.max(280, window.innerWidth - rect.left - 16);
-    const availableHeight = Math.max(280, window.innerHeight - rect.top - 16);
-    const minWidth = Math.min(544, availableWidth);
-    const minHeight = Math.min(384, availableHeight);
-    const maxWidth = Math.max(minWidth, availableWidth);
-    const maxHeight = Math.max(minHeight, availableHeight);
+    const viewportPadding = 16;
+    const maxWidth = Math.max(280, window.innerWidth - viewportPadding * 2);
+    const maxHeight = Math.max(280, window.innerHeight - viewportPadding * 2);
+    const minWidth = Math.min(544, maxWidth);
+    const minHeight = Math.min(384, maxHeight);
 
     setModalSize({
       position: "fixed",
@@ -1306,11 +1306,25 @@ function useResizableStatBlockModal() {
       pointerEvent.preventDefault();
       pointerEvent.stopPropagation();
 
-      const nextWidth = Math.min(maxWidth, Math.max(minWidth, rect.width + pointerEvent.clientX - startX));
-      const nextHeight = Math.min(maxHeight, Math.max(minHeight, rect.height + pointerEvent.clientY - startY));
+      const deltaX = pointerEvent.clientX - startX;
+      const deltaY = pointerEvent.clientY - startY;
+      const nextWidth = Math.min(maxWidth, Math.max(minWidth, rect.width + deltaX * 2));
+      const nextHeight = Math.min(maxHeight, Math.max(minHeight, rect.height + deltaY * 2));
+      const widthChange = nextWidth - rect.width;
+      const heightChange = nextHeight - rect.height;
+      const nextLeft = Math.min(
+        window.innerWidth - viewportPadding - nextWidth,
+        Math.max(viewportPadding, rect.left - widthChange / 2),
+      );
+      const nextTop = Math.min(
+        window.innerHeight - viewportPadding - nextHeight,
+        Math.max(viewportPadding, rect.top - heightChange / 2),
+      );
 
       setModalSize((currentSize) => ({
         ...currentSize,
+        left: nextLeft,
+        top: nextTop,
         width: nextWidth,
         height: nextHeight,
       }));
@@ -1319,6 +1333,9 @@ function useResizableStatBlockModal() {
     function stopResize(pointerEvent: PointerEvent) {
       pointerEvent.preventDefault();
       pointerEvent.stopPropagation();
+      if (resizeHandle.hasPointerCapture(pointerEvent.pointerId)) {
+        resizeHandle.releasePointerCapture(pointerEvent.pointerId);
+      }
       window.removeEventListener("pointermove", resize, true);
       window.removeEventListener("pointerup", stopResize, true);
       window.removeEventListener("pointercancel", stopResize, true);
