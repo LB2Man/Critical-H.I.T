@@ -50,7 +50,6 @@ import {
   SortDesc,
   Sword,
   Trash2,
-  Users,
 } from "lucide-react";
 import { auth, db, firebaseReady, googleProvider } from "../lib/firebase";
 import {
@@ -580,10 +579,7 @@ function CampaignCard({
       {...listeners}
     >
       <div className="campaign-card-top">
-        <div className="drag-handle campaign-drag" title="Drag campaign">
-          <GripVertical aria-hidden="true" />
-        </div>
-        <Users aria-hidden="true" />
+        <D20Icon />
         {(isCreator || isAcceptedInvitee) && (
           <button
             className="icon-button danger"
@@ -625,6 +621,27 @@ function CampaignCard({
         </div>
       ) : null}
     </div>
+  );
+}
+
+function D20Icon() {
+  return (
+    <svg className="campaign-d20" viewBox="0 0 64 64" aria-hidden="true" focusable="false">
+      <path className="d20-fill" d="M32 3 60 20 60 47 32 61 4 47 4 20Z" />
+      <path d="M32 3 60 20 60 47 32 61 4 47 4 20Z" />
+      <path d="M32 3v12" />
+      <path d="M4 20 32 15 60 20" />
+      <path d="M32 15 15 45" />
+      <path d="M32 15 49 45" />
+      <path d="M15 45h34" />
+      <path d="M4 20 15 45 4 47" />
+      <path d="M60 20 49 45 60 47" />
+      <path d="M15 45 32 61 49 45" />
+      <path d="M4 47 32 61 60 47" />
+      <text className="d20-number d20-center" x="32" y="37.5" textAnchor="middle" textLength="17" lengthAdjust="spacingAndGlyphs">
+        20
+      </text>
+    </svg>
   );
 }
 
@@ -953,8 +970,8 @@ function RoomView({ room, user, onBack }: { room: Room; user: User; onBack: () =
                       canEdit={isCreator || combatant.ownerUid === user.uid}
                       canDrag={isCreator}
                       currentUserId={user.uid}
-                      hideHp={!isCreator && room.hideHpFromInvitees}
-                      hideAc={!isCreator && room.hideAcFromInvitees}
+                      hideHp={!isCreator && combatant.ownerUid !== user.uid && room.hideHpFromInvitees}
+                      hideAc={!isCreator && combatant.ownerUid !== user.uid && room.hideAcFromInvitees}
                       onUpdate={(patch) => updateCombatant(combatant.id, patch)}
                       onRemove={() => removeCombatant(combatant.id)}
                     />
@@ -999,7 +1016,6 @@ function CombatantRow({
   const [conditionName, setConditionName] = useState<Condition>("blinded");
   const [conditionRounds, setConditionRounds] = useState("");
   const [hpActionAmount, setHpActionAmount] = useState("");
-  const [fallbackPromptId, setFallbackPromptId] = useState<string | null>(null);
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: combatant.id,
     disabled: !canDrag,
@@ -1013,25 +1029,7 @@ function CombatantRow({
   const exhaustionLevel = combatant.exhaustionLevel ?? 0;
   const concentrationPrompt = combatant.concentrationPrompt ?? null;
   const shouldShowConcentrationPrompt =
-    Boolean(concentrationPrompt) &&
-    (concentrationPrompt?.ownerUid === currentUserId || fallbackPromptId === concentrationPrompt?.id);
-
-  useEffect(() => {
-    if (
-      !concentrationPrompt ||
-      concentrationPrompt.ownerUid === currentUserId ||
-      concentrationPrompt.fallbackUid !== currentUserId
-    ) {
-      setFallbackPromptId(null);
-      return;
-    }
-
-    const timeout = window.setTimeout(() => {
-      setFallbackPromptId(concentrationPrompt.id);
-    }, 2500);
-
-    return () => window.clearTimeout(timeout);
-  }, [concentrationPrompt, currentUserId]);
+    Boolean(concentrationPrompt) && concentrationPrompt?.ownerUid === currentUserId;
 
   function addCondition(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();

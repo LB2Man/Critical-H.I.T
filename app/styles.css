@@ -260,22 +260,46 @@ select:focus {
   gap: 0.45rem;
 }
 
-.campaign-card-top > svg {
-  color: var(--red-bright);
-}
-
 .campaign-card-top .icon-button {
   margin-left: auto;
 }
 
-.campaign-drag {
-  width: 1.8rem;
-  height: 1.8rem;
-  pointer-events: none;
+.campaign-d20 {
+  width: 2.25rem;
+  height: 2.25rem;
+  color: #120808;
+  filter: drop-shadow(0 0 0.35rem rgba(241, 57, 70, 0.18));
+  stroke: currentColor;
+  stroke-width: 2.8;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+}
+
+.campaign-d20 .d20-fill {
+  fill: var(--red-bright);
+}
+
+.campaign-d20 path:not(.d20-fill) {
+  fill: none;
+}
+
+.campaign-d20 .d20-number {
+  fill: #130707;
+  stroke: none;
+  font-family: Arial, Helvetica, sans-serif;
+  font-weight: 900;
+}
+
+.campaign-d20 .d20-center {
+  font-size: 15px;
 }
 
 .room-card svg {
   color: var(--red-bright);
+}
+
+.room-card .campaign-d20 {
+  color: #130707;
 }
 
 .room-card span {
