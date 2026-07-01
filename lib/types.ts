@@ -65,6 +65,8 @@ export type StatBlock = {
   id: string;
   title: string;
   body: string;
+  ac?: number;
+  hp?: number;
   order?: number;
 };
 

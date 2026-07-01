@@ -495,10 +495,15 @@ select:focus {
 .stat-block-modal-header {
   display: flex;
   gap: 0.75rem;
-  align-items: center;
+  align-items: flex-start;
 }
 
-.stat-block-modal-header input,
+.stat-block-title-area {
+  flex: 1 1 auto;
+  display: grid;
+  gap: 0.6rem;
+}
+
 .stat-block-modal-header h2 {
   flex: 1 1 auto;
   color: var(--gold);
@@ -514,6 +519,23 @@ select:focus {
   display: flex;
   gap: 0.5rem;
   align-items: center;
+}
+
+.stat-block-core-fields,
+.stat-block-core-summary {
+  display: flex;
+  gap: 0.65rem;
+  align-items: end;
+  flex-wrap: wrap;
+}
+
+.stat-block-core-fields .field-stack {
+  width: 5.5rem;
+}
+
+.stat-block-core-summary {
+  color: var(--muted);
+  font-weight: 700;
 }
 
 .field-error {
@@ -1004,6 +1026,34 @@ summary {
   width: 100%;
 }
 
+.name-input-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0.45rem;
+  align-items: center;
+}
+
+.monster-link-button {
+  display: inline-grid;
+  place-items: center;
+  width: 2rem;
+  height: 2rem;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #171010;
+  padding: 0;
+}
+
+.monster-link-button:hover,
+.monster-link-button:focus {
+  border-color: var(--red);
+}
+
+.monster-link-button .monster-icon {
+  width: 1.35rem;
+  height: 1.35rem;
+}
+
 .name-suggestions {
   position: absolute;
   top: calc(100% + 0.35rem);
@@ -1036,6 +1086,10 @@ summary {
 .name-suggestions button:focus {
   background: rgba(181, 22, 37, 0.28);
   color: var(--gold);
+}
+
+.read-only-stat-block-modal {
+  resize: both;
 }
 
 .add-condition-wrap {

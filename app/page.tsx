@@ -756,6 +756,8 @@ function RoomView({ room, user, onBack }: { room: Room; user: User; onBack: () =
     const order = statBlocks.length ? Math.max(...statBlocks.map((item) => item.order ?? 0)) + 1 : 0;
     const statBlockRef = await addDoc(collection(db, "rooms", room.id, "statBlocks"), {
       title: "",
+      ac: 10,
+      hp: 10,
       body: "AC 10\nHP 10\n\n**Abilities**\nAdd abilities here.",
       order,
       createdAt: serverTimestamp(),
@@ -1082,7 +1084,7 @@ function RoomView({ room, user, onBack }: { room: Room; user: User; onBack: () =
                       canEdit={isCreator || combatant.ownerUid === user.uid}
                       canDrag={isCreator}
                       currentUserId={user.uid}
-                      statBlockTitles={isCreator ? statBlocks.map((statBlock) => statBlock.title).filter(Boolean) : []}
+                      statBlocks={isCreator ? statBlocks.filter((statBlock) => statBlock.title.trim()) : []}
                       hideHp={!isCreator && combatant.ownerUid !== user.uid && room.hideHpFromInvitees}
                       hideAc={!isCreator && combatant.ownerUid !== user.uid && room.hideAcFromInvitees}
                       onUpdate={(patch) => updateCombatant(combatant.id, patch)}
@@ -1268,6 +1270,8 @@ function StatBlockModal({
   onUpdate: (id: string, patch: Partial<StatBlock>) => void;
 }) {
   const [draftTitle, setDraftTitle] = useState(statBlock.title);
+  const [draftAc, setDraftAc] = useState(statBlock.ac ?? 10);
+  const [draftHp, setDraftHp] = useState(statBlock.hp ?? 10);
   const [draftBody, setDraftBody] = useState(statBlock.body);
   const [editing, setEditing] = useState(!statBlock.title && !statBlock.body);
   const [confirmDiscard, setConfirmDiscard] = useState(false);
@@ -1275,13 +1279,19 @@ function StatBlockModal({
 
   useEffect(() => {
     setDraftTitle(statBlock.title);
+    setDraftAc(statBlock.ac ?? 10);
+    setDraftHp(statBlock.hp ?? 10);
     setDraftBody(statBlock.body);
     setEditing(!statBlock.title && !statBlock.body);
     setConfirmDiscard(false);
     setTitleError("");
   }, [statBlock.id, statBlock.title, statBlock.body]);
 
-  const hasUnsavedChanges = draftTitle !== statBlock.title || draftBody !== statBlock.body;
+  const hasUnsavedChanges =
+    draftTitle !== statBlock.title ||
+    draftAc !== (statBlock.ac ?? 10) ||
+    draftHp !== (statBlock.hp ?? 10) ||
+    draftBody !== statBlock.body;
 
   function saveStatBlock() {
     const normalizedTitle = normalizeStatBlockTitle(draftTitle);
@@ -1301,6 +1311,8 @@ function StatBlockModal({
 
     onUpdate(statBlock.id, {
       title: draftTitle.trim(),
+      ac: draftAc,
+      hp: draftHp,
       body: draftBody,
     });
     setEditing(false);
@@ -1327,20 +1339,50 @@ function StatBlockModal({
         onClick={(event) => event.stopPropagation()}
       >
         <div className="stat-block-modal-header">
-          {editing ? (
-            <input
-              id="stat-block-title"
-              value={draftTitle}
-              onChange={(event) => {
-                setDraftTitle(event.target.value);
-                setTitleError("");
-              }}
-              placeholder="Name"
-              aria-label="Stat block title"
-            />
-          ) : (
-            <h2 id="stat-block-title">{draftTitle || "Name"}</h2>
-          )}
+          <div className="stat-block-title-area">
+            {editing ? (
+              <>
+                <input
+                  id="stat-block-title"
+                  value={draftTitle}
+                  onChange={(event) => {
+                    setDraftTitle(event.target.value);
+                    setTitleError("");
+                  }}
+                  placeholder="Name"
+                  aria-label="Stat block title"
+                />
+                <div className="stat-block-core-fields">
+                  <label className="field-stack">
+                    <span>AC</span>
+                    <input
+                      type="number"
+                      value={draftAc}
+                      onChange={(event) => setDraftAc(Number(event.target.value))}
+                      aria-label="Stat block AC"
+                    />
+                  </label>
+                  <label className="field-stack">
+                    <span>HP</span>
+                    <input
+                      type="number"
+                      value={draftHp}
+                      onChange={(event) => setDraftHp(Number(event.target.value))}
+                      aria-label="Stat block HP"
+                    />
+                  </label>
+                </div>
+              </>
+            ) : (
+              <>
+                <h2 id="stat-block-title">{draftTitle || "Name"}</h2>
+                <div className="stat-block-core-summary">
+                  <span>AC {draftAc}</span>
+                  <span>HP {draftHp}</span>
+                </div>
+              </>
+            )}
+          </div>
           <div className="stat-block-modal-actions">
             {editing ? (
               <button className="tool-button" onClick={saveStatBlock}>
@@ -1462,7 +1504,7 @@ function CombatantRow({
   canEdit,
   canDrag,
   currentUserId,
-  statBlockTitles,
+  statBlocks,
   hideHp,
   hideAc,
   onUpdate,
@@ -1475,7 +1517,7 @@ function CombatantRow({
   canEdit: boolean;
   canDrag: boolean;
   currentUserId: string;
-  statBlockTitles: string[];
+  statBlocks: StatBlock[];
   hideHp: boolean;
   hideAc: boolean;
   onUpdate: (patch: Partial<Combatant>) => void;
@@ -1486,6 +1528,7 @@ function CombatantRow({
   const [conditionRounds, setConditionRounds] = useState("");
   const [hpActionAmount, setHpActionAmount] = useState("");
   const [nameFocused, setNameFocused] = useState(false);
+  const [previewStatBlock, setPreviewStatBlock] = useState<StatBlock | null>(null);
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: combatant.id,
     disabled: !canDrag,
@@ -1504,10 +1547,13 @@ function CombatantRow({
   const conditionSuggestions = CONDITIONS.filter((condition) =>
     conditionLabel(condition).toLowerCase().includes(conditionInput.trim().toLowerCase()),
   );
+  const matchedStatBlock = statBlocks.find(
+    (statBlock) => normalizeStatBlockTitle(statBlock.title) === normalizeStatBlockTitle(combatant.name),
+  );
   const statBlockNameSuggestions =
     nameFocused && combatant.name.trim()
-      ? statBlockTitles
-          .filter((title) => title.toLowerCase().includes(combatant.name.trim().toLowerCase()))
+      ? statBlocks
+          .filter((statBlock) => statBlock.title.toLowerCase().includes(combatant.name.trim().toLowerCase()))
           .slice(0, 6)
       : [];
 
@@ -1618,29 +1664,47 @@ function CombatantRow({
       </label>
       <div className="combatant-main">
         <div className="name-combobox">
-          <input
-            className="name-input"
-            value={combatant.name}
-            placeholder="Name"
-            disabled={!canManage}
-            onFocus={() => setNameFocused(true)}
-            onBlur={() => window.setTimeout(() => setNameFocused(false), 120)}
-            onChange={(event) => onUpdate({ name: event.target.value })}
-            aria-label="Combatant name"
-          />
+          <div className="name-input-row">
+            <input
+              className="name-input"
+              value={combatant.name}
+              placeholder="Name"
+              disabled={!canManage}
+              onFocus={() => setNameFocused(true)}
+              onBlur={() => window.setTimeout(() => setNameFocused(false), 120)}
+              onChange={(event) => onUpdate({ name: event.target.value })}
+              aria-label="Combatant name"
+            />
+            {matchedStatBlock && (
+              <button
+                className="monster-link-button"
+                type="button"
+                title="Open stat block"
+                onMouseDown={(event) => event.preventDefault()}
+                onClick={() => setPreviewStatBlock(matchedStatBlock)}
+              >
+                <MonsterIcon />
+              </button>
+            )}
+          </div>
           {statBlockNameSuggestions.length > 0 && (
             <div className="name-suggestions">
-              {statBlockNameSuggestions.map((title) => (
+              {statBlockNameSuggestions.map((statBlock) => (
                 <button
-                  key={title}
+                  key={statBlock.id}
                   type="button"
                   onMouseDown={(event) => event.preventDefault()}
                   onClick={() => {
-                    onUpdate({ name: title });
+                    onUpdate({
+                      name: statBlock.title,
+                      ac: statBlock.ac ?? 10,
+                      hp: statBlock.hp ?? 10,
+                      maxHp: statBlock.hp ?? 10,
+                    });
                     setNameFocused(false);
                   }}
                 >
-                  {title}
+                  {statBlock.title}
                 </button>
               ))}
             </div>
@@ -1843,6 +1907,41 @@ function CombatantRow({
           </div>
         </div>
       )}
+      {previewStatBlock && (
+        <ReadOnlyStatBlockModal statBlock={previewStatBlock} onClose={() => setPreviewStatBlock(null)} />
+      )}
+    </div>
+  );
+}
+
+function ReadOnlyStatBlockModal({ statBlock, onClose }: { statBlock: StatBlock; onClose: () => void }) {
+  return (
+    <div className="modal-backdrop" role="presentation" onClick={onClose}>
+      <div
+        className="stat-block-modal read-only-stat-block-modal"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="readonly-stat-block-title"
+        onClick={(event) => event.stopPropagation()}
+      >
+        <div className="stat-block-modal-header">
+          <div className="stat-block-title-area">
+            <h2 id="readonly-stat-block-title">{statBlock.title || "Name"}</h2>
+            <div className="stat-block-core-summary">
+              <span>AC {statBlock.ac ?? 10}</span>
+              <span>HP {statBlock.hp ?? 10}</span>
+            </div>
+          </div>
+          <div className="stat-block-modal-actions">
+            <button className="subtle-button" onClick={onClose}>
+              Close
+            </button>
+          </div>
+        </div>
+        <div className="stat-block-preview stat-block-preview-only">
+          <RenderedStatBlock text={statBlock.body} />
+        </div>
+      </div>
     </div>
   );
 }
