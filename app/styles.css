@@ -476,9 +476,11 @@ select:focus {
 }
 
 .stat-block-modal {
+  position: relative;
   width: min(68rem, 100%);
   min-width: min(34rem, 100%);
   min-height: 24rem;
+  max-width: calc(100vw - 2rem);
   max-height: min(46rem, calc(100vh - 2rem));
   display: grid;
   gap: 0.85rem;
@@ -488,7 +490,6 @@ select:focus {
   box-shadow: 0 1rem 3rem var(--shadow);
   padding: 1rem;
   overflow: auto;
-  resize: both;
   scrollbar-color: var(--red) #0c0909;
 }
 
@@ -663,9 +664,26 @@ select:focus {
   background: var(--red);
 }
 
-.stat-block-modal::-webkit-resizer,
-.stat-block-editor textarea::-webkit-resizer {
-  background: linear-gradient(135deg, transparent 45%, var(--red) 46%, var(--red) 60%, transparent 61%);
+.stat-block-resize-handle {
+  position: absolute;
+  right: 0.25rem;
+  bottom: 0.25rem;
+  z-index: 2;
+  width: 1.35rem;
+  height: 1.35rem;
+  border: 0;
+  border-radius: 0 0 6px 0;
+  background:
+    linear-gradient(135deg, transparent 47%, var(--red-bright) 48%, var(--red-bright) 54%, transparent 55%),
+    linear-gradient(135deg, transparent 62%, rgba(241, 57, 70, 0.75) 63%, rgba(241, 57, 70, 0.75) 69%, transparent 70%);
+  cursor: nwse-resize;
+  opacity: 0.9;
+}
+
+.stat-block-resize-handle:hover,
+.stat-block-resize-handle:focus-visible {
+  opacity: 1;
+  filter: drop-shadow(0 0 0.35rem rgba(241, 57, 70, 0.45));
 }
 
 .room-header {
@@ -1090,10 +1108,6 @@ summary {
 .name-suggestions button:focus {
   background: rgba(181, 22, 37, 0.28);
   color: var(--gold);
-}
-
-.read-only-stat-block-modal {
-  resize: both;
 }
 
 .add-condition-wrap {

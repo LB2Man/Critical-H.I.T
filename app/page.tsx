@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   DndContext,
   DragEndEvent,
@@ -747,18 +747,14 @@ function RoomView({ room, user, onBack }: { room: Room; user: User; onBack: () =
 
   async function addStatBlock() {
     if (!isCreator) return;
-    const existingDraft = statBlocks.find((statBlock) => !statBlock.title.trim());
-    if (existingDraft) {
-      setActiveStatBlockId(existingDraft.id);
-      return;
-    }
 
     const order = statBlocks.length ? Math.max(...statBlocks.map((item) => item.order ?? 0)) + 1 : 0;
+    const title = nextDefaultStatBlockTitle(statBlocks);
     const statBlockRef = await addDoc(collection(db, "rooms", room.id, "statBlocks"), {
-      title: "",
+      title,
       ac: 10,
       hp: 10,
-      body: "AC 10\nHP 10\n\n**Abilities**\nAdd abilities here.",
+      body: "**Abilities**\nAdd abilities here.",
       order,
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
@@ -1088,6 +1084,7 @@ function RoomView({ room, user, onBack }: { room: Room; user: User; onBack: () =
                       hideHp={!isCreator && combatant.ownerUid !== user.uid && room.hideHpFromInvitees}
                       hideAc={!isCreator && combatant.ownerUid !== user.uid && room.hideAcFromInvitees}
                       onUpdate={(patch) => updateCombatant(combatant.id, patch)}
+                      onUpdateStatBlock={updateStatBlock}
                       onRemove={() => removeCombatant(combatant.id)}
                     />
                   ))}
@@ -1258,34 +1255,120 @@ function normalizeStatBlockTitle(title: string) {
   return title.trim().replace(/\s+/g, " ").toLowerCase();
 }
 
+function nextDefaultStatBlockTitle(statBlocks: StatBlock[]) {
+  const existingTitles = new Set(
+    statBlocks.map((statBlock) => normalizeStatBlockTitle(statBlock.title.trim() || "Name")),
+  );
+
+  if (!existingTitles.has("name")) return "Name";
+
+  let index = 1;
+  while (existingTitles.has(`name${index}`)) {
+    index += 1;
+  }
+
+  return `Name${index}`;
+}
+
+function useResizableStatBlockModal() {
+  const modalRef = useRef<HTMLDivElement | null>(null);
+  const [modalSize, setModalSize] = useState<React.CSSProperties>({});
+
+  function startResize(event: React.PointerEvent<HTMLButtonElement>) {
+    event.preventDefault();
+    event.stopPropagation();
+
+    const modal = modalRef.current;
+    if (!modal) return;
+
+    event.currentTarget.setPointerCapture(event.pointerId);
+    const rect = modal.getBoundingClientRect();
+    const startX = event.clientX;
+    const startY = event.clientY;
+    const availableWidth = Math.max(280, window.innerWidth - rect.left - 16);
+    const availableHeight = Math.max(280, window.innerHeight - rect.top - 16);
+    const minWidth = Math.min(544, availableWidth);
+    const minHeight = Math.min(384, availableHeight);
+    const maxWidth = Math.max(minWidth, availableWidth);
+    const maxHeight = Math.max(minHeight, availableHeight);
+
+    setModalSize({
+      position: "fixed",
+      left: rect.left,
+      top: rect.top,
+      width: rect.width,
+      height: rect.height,
+      maxWidth,
+      maxHeight,
+    });
+
+    function resize(pointerEvent: PointerEvent) {
+      pointerEvent.preventDefault();
+      pointerEvent.stopPropagation();
+
+      const nextWidth = Math.min(maxWidth, Math.max(minWidth, rect.width + pointerEvent.clientX - startX));
+      const nextHeight = Math.min(maxHeight, Math.max(minHeight, rect.height + pointerEvent.clientY - startY));
+
+      setModalSize((currentSize) => ({
+        ...currentSize,
+        width: nextWidth,
+        height: nextHeight,
+      }));
+    }
+
+    function stopResize(pointerEvent: PointerEvent) {
+      pointerEvent.preventDefault();
+      pointerEvent.stopPropagation();
+      window.removeEventListener("pointermove", resize, true);
+      window.removeEventListener("pointerup", stopResize, true);
+      window.removeEventListener("pointercancel", stopResize, true);
+    }
+
+    window.addEventListener("pointermove", resize, true);
+    window.addEventListener("pointerup", stopResize, true);
+    window.addEventListener("pointercancel", stopResize, true);
+  }
+
+  return { modalRef, modalSize, startResize };
+}
+
 function StatBlockModal({
   statBlock,
   statBlocks,
   onClose,
   onUpdate,
+  initialEditing = false,
 }: {
   statBlock: StatBlock;
   statBlocks: StatBlock[];
   onClose: () => void;
   onUpdate: (id: string, patch: Partial<StatBlock>) => void;
+  initialEditing?: boolean;
 }) {
   const [draftTitle, setDraftTitle] = useState(statBlock.title);
   const [draftAc, setDraftAc] = useState(statBlock.ac ?? 10);
   const [draftHp, setDraftHp] = useState(statBlock.hp ?? 10);
   const [draftBody, setDraftBody] = useState(statBlock.body);
-  const [editing, setEditing] = useState(!statBlock.title && !statBlock.body);
+  const [editing, setEditing] = useState(initialEditing || (!statBlock.title && !statBlock.body));
   const [confirmDiscard, setConfirmDiscard] = useState(false);
   const [titleError, setTitleError] = useState("");
+  const previousStatBlockId = useRef(statBlock.id);
+  const { modalRef, modalSize, startResize } = useResizableStatBlockModal();
 
   useEffect(() => {
+    const statBlockChanged = previousStatBlockId.current !== statBlock.id;
+    previousStatBlockId.current = statBlock.id;
+
     setDraftTitle(statBlock.title);
     setDraftAc(statBlock.ac ?? 10);
     setDraftHp(statBlock.hp ?? 10);
     setDraftBody(statBlock.body);
-    setEditing(!statBlock.title && !statBlock.body);
+    if (statBlockChanged) {
+      setEditing(initialEditing || (!statBlock.title && !statBlock.body));
+    }
     setConfirmDiscard(false);
     setTitleError("");
-  }, [statBlock.id, statBlock.title, statBlock.body]);
+  }, [statBlock.id, statBlock.title, statBlock.ac, statBlock.hp, statBlock.body, initialEditing]);
 
   const hasUnsavedChanges =
     draftTitle !== statBlock.title ||
@@ -1332,7 +1415,9 @@ function StatBlockModal({
   return (
     <div className="modal-backdrop" role="presentation" onClick={requestClose}>
       <div
+        ref={modalRef}
         className="stat-block-modal"
+        style={modalSize}
         role="dialog"
         aria-modal="true"
         aria-labelledby="stat-block-title"
@@ -1419,6 +1504,13 @@ function StatBlockModal({
             <RenderedStatBlock text={draftBody} />
           </div>
         )}
+        <button
+          className="stat-block-resize-handle"
+          type="button"
+          aria-label="Resize stat block window"
+          onPointerDown={startResize}
+          onClick={(event) => event.stopPropagation()}
+        />
       </div>
       {confirmDiscard && (
         <div className="modal-backdrop nested-modal" role="presentation" onClick={(event) => event.stopPropagation()}>
@@ -1512,6 +1604,7 @@ function CombatantRow({
   hideHp,
   hideAc,
   onUpdate,
+  onUpdateStatBlock,
   onRemove,
 }: {
   combatant: Combatant;
@@ -1525,6 +1618,7 @@ function CombatantRow({
   hideHp: boolean;
   hideAc: boolean;
   onUpdate: (patch: Partial<Combatant>) => void;
+  onUpdateStatBlock: (id: string, patch: Partial<StatBlock>) => void;
   onRemove: () => void;
 }) {
   const [addingCondition, setAddingCondition] = useState(false);
@@ -1533,6 +1627,7 @@ function CombatantRow({
   const [hpActionAmount, setHpActionAmount] = useState("");
   const [nameFocused, setNameFocused] = useState(false);
   const [previewStatBlock, setPreviewStatBlock] = useState<StatBlock | null>(null);
+  const [editingPreviewStatBlock, setEditingPreviewStatBlock] = useState(false);
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: combatant.id,
     disabled: !canDrag,
@@ -1554,6 +1649,9 @@ function CombatantRow({
   const matchedStatBlock = statBlocks.find(
     (statBlock) => normalizeStatBlockTitle(statBlock.title) === normalizeStatBlockTitle(combatant.name),
   );
+  const currentPreviewStatBlock = previewStatBlock
+    ? statBlocks.find((statBlock) => statBlock.id === previewStatBlock.id) || previewStatBlock
+    : null;
   const statBlockNameSuggestions =
     nameFocused && combatant.name.trim()
       ? statBlocks
@@ -1685,7 +1783,10 @@ function CombatantRow({
                 type="button"
                 title="Open stat block"
                 onMouseDown={(event) => event.preventDefault()}
-                onClick={() => setPreviewStatBlock(matchedStatBlock)}
+                onClick={() => {
+                  setPreviewStatBlock(matchedStatBlock);
+                  setEditingPreviewStatBlock(false);
+                }}
               >
                 <MonsterIcon />
               </button>
@@ -1911,18 +2012,49 @@ function CombatantRow({
           </div>
         </div>
       )}
-      {previewStatBlock && (
-        <ReadOnlyStatBlockModal statBlock={previewStatBlock} onClose={() => setPreviewStatBlock(null)} />
+      {currentPreviewStatBlock && editingPreviewStatBlock && (
+        <StatBlockModal
+          statBlock={currentPreviewStatBlock}
+          statBlocks={statBlocks}
+          onClose={() => {
+            setPreviewStatBlock(null);
+            setEditingPreviewStatBlock(false);
+          }}
+          onUpdate={onUpdateStatBlock}
+          initialEditing
+        />
+      )}
+      {currentPreviewStatBlock && !editingPreviewStatBlock && (
+        <ReadOnlyStatBlockModal
+          statBlock={currentPreviewStatBlock}
+          onClose={() => {
+            setPreviewStatBlock(null);
+            setEditingPreviewStatBlock(false);
+          }}
+          onEdit={() => setEditingPreviewStatBlock(true)}
+        />
       )}
     </div>
   );
 }
 
-function ReadOnlyStatBlockModal({ statBlock, onClose }: { statBlock: StatBlock; onClose: () => void }) {
+function ReadOnlyStatBlockModal({
+  statBlock,
+  onClose,
+  onEdit,
+}: {
+  statBlock: StatBlock;
+  onClose: () => void;
+  onEdit: () => void;
+}) {
+  const { modalRef, modalSize, startResize } = useResizableStatBlockModal();
+
   return (
     <div className="modal-backdrop" role="presentation" onClick={onClose}>
       <div
+        ref={modalRef}
         className="stat-block-modal read-only-stat-block-modal"
+        style={modalSize}
         role="dialog"
         aria-modal="true"
         aria-labelledby="readonly-stat-block-title"
@@ -1941,6 +2073,9 @@ function ReadOnlyStatBlockModal({ statBlock, onClose }: { statBlock: StatBlock; 
             </div>
           </div>
           <div className="stat-block-modal-actions">
+            <button className="tool-button" onClick={onEdit}>
+              Edit
+            </button>
             <button className="subtle-button" onClick={onClose}>
               Close
             </button>
@@ -1949,6 +2084,13 @@ function ReadOnlyStatBlockModal({ statBlock, onClose }: { statBlock: StatBlock; 
         <div className="stat-block-preview stat-block-preview-only">
           <RenderedStatBlock text={statBlock.body} />
         </div>
+        <button
+          className="stat-block-resize-handle"
+          type="button"
+          aria-label="Resize stat block window"
+          onPointerDown={startResize}
+          onClick={(event) => event.stopPropagation()}
+        />
       </div>
     </div>
   );

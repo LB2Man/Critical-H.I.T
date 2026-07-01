@@ -3,7 +3,7 @@ import "./styles.css";
 
 export const metadata: Metadata = {
   title: "Critical H.I.T",
-  description: "A Firebase-powered Dungeons and Dragons combat tracker.",
+  description: "A Dungeons and Dragons DM and Player Tool",
 };
 
 export default function RootLayout({
