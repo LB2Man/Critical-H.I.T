@@ -60,6 +60,7 @@ import {
   HpVisibility,
   Room,
   CONDITIONS,
+  activeConditionLabel,
   conditionLabel,
   hiddenHpStatus,
   normalizeConditions,
@@ -1013,7 +1014,7 @@ function CombatantRow({
   onRemove: () => void;
 }) {
   const [addingCondition, setAddingCondition] = useState(false);
-  const [conditionName, setConditionName] = useState<Condition>("blinded");
+  const [conditionInput, setConditionInput] = useState("");
   const [conditionRounds, setConditionRounds] = useState("");
   const [hpActionAmount, setHpActionAmount] = useState("");
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
@@ -1037,10 +1038,20 @@ function CombatantRow({
 
     const rounds = Number(conditionRounds);
     const hasRounds = Number.isFinite(rounds) && rounds > 0;
+    const typedCondition = conditionInput.trim();
+    if (!typedCondition) return;
+
+    const matchedCondition = CONDITIONS.find(
+      (condition) => conditionLabel(condition).toLowerCase() === typedCondition.toLowerCase(),
+    );
     const nextCondition: ActiveCondition = {
-      id: `${conditionName}-${Date.now()}`,
-      name: conditionName,
+      id: `${matchedCondition || "custom"}-${Date.now()}`,
+      name: matchedCondition || "custom",
     };
+
+    if (!matchedCondition) {
+      nextCondition.customName = typedCondition;
+    }
 
     if (hasRounds) {
       nextCondition.rounds = rounds;
@@ -1048,6 +1059,7 @@ function CombatantRow({
     }
 
     onUpdate({ conditions: [...conditions, nextCondition] });
+    setConditionInput("");
     setConditionRounds("");
     setAddingCondition(false);
   }
@@ -1080,7 +1092,7 @@ function CombatantRow({
       patch.concentrationPrompt = {
         id: `${combatant.id}-${Date.now()}`,
         dc: Math.max(10, Math.floor(amount / 2)),
-        ownerUid: combatant.ownerUid,
+        ownerUid: combatant.ownerUid || currentUserId,
         fallbackUid: currentUserId,
       };
     }
@@ -1137,7 +1149,7 @@ function CombatantRow({
               onClick={() => removeCondition(condition.id)}
               title="Remove condition"
             >
-              {conditionLabel(condition.name)}
+              {activeConditionLabel(condition)}
               {condition.rounds ? ` (${conditionRoundsLeft(condition)})` : ""}
               <span aria-hidden="true">x</span>
             </button>
@@ -1152,17 +1164,21 @@ function CombatantRow({
           )}
           {addingCondition && (
             <form className="condition-menu" onSubmit={addCondition}>
-              <select
-                value={conditionName}
-                onChange={(event) => setConditionName(event.target.value as Condition)}
+              <input
+                type="text"
+                list={`conditions-${combatant.id}`}
+                value={conditionInput}
+                onChange={(event) => setConditionInput(event.target.value)}
+                placeholder="Condition"
                 aria-label="Condition"
-              >
+              />
+              <datalist id={`conditions-${combatant.id}`}>
                 {CONDITIONS.map((condition) => (
-                  <option key={condition} value={condition}>
+                  <option key={condition} value={conditionLabel(condition)}>
                     {conditionLabel(condition)}
                   </option>
                 ))}
-              </select>
+              </datalist>
               <input
                 type="number"
                 min="1"

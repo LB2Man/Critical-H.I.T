@@ -746,7 +746,7 @@ summary {
   left: 0;
   bottom: calc(100% + 0.45rem);
   display: grid;
-  grid-template-columns: minmax(12rem, 1fr) 6rem auto auto;
+  grid-template-columns: minmax(18rem, 1fr) 6rem auto auto;
   gap: 0.5rem;
   width: min(44rem, 78vw);
   max-height: none;

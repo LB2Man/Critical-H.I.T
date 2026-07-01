@@ -12,15 +12,16 @@ export const CONDITIONS = [
   "restrained",
   "stunned",
   "concentration",
-  "custom",
 ] as const;
 
 export type Condition = (typeof CONDITIONS)[number];
+export type ConditionName = Condition | "custom";
 export type HpVisibility = "hideHpFromInvitees" | "hideAcFromInvitees";
 
 export type ActiveCondition = {
   id: string;
-  name: Condition;
+  name: ConditionName;
+  customName?: string;
   rounds?: number;
   expiresOnRound?: number;
 };
@@ -66,6 +67,11 @@ export function conditionLabel(condition: Condition) {
     .join(" ");
 }
 
+export function activeConditionLabel(condition: ActiveCondition) {
+  if (condition.name === "custom") return condition.customName || "Custom";
+  return conditionLabel(condition.name);
+}
+
 export function normalizeConditions(conditions: unknown): ActiveCondition[] {
   if (!Array.isArray(conditions)) return [];
 
@@ -82,13 +88,18 @@ export function normalizeConditions(conditions: unknown): ActiveCondition[] {
         condition &&
         typeof condition === "object" &&
         "name" in condition &&
-        CONDITIONS.includes((condition as { name: Condition }).name)
+        (CONDITIONS.includes((condition as { name: Condition }).name) ||
+          (condition as { name: string }).name === "custom")
       ) {
         const active = condition as ActiveCondition;
         const normalized: ActiveCondition = {
           id: active.id || `${active.name}-${crypto.randomUUID()}`,
           name: active.name,
         };
+
+        if (typeof active.customName === "string" && active.customName.trim()) {
+          normalized.customName = active.customName.trim();
+        }
 
         if (typeof active.rounds === "number" && active.rounds > 0) {
           normalized.rounds = active.rounds;
