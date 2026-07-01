@@ -51,6 +51,7 @@ export type Combatant = {
     fallbackUid: string;
   } | null;
   hp: number;
+  tempHp: number;
   maxHp: number;
   ac: number;
   exhaustionLevel: number;

@@ -695,6 +695,7 @@ function RoomView({ room, user, onBack }: { room: Room; user: User; onBack: () =
       name: isPlayer ? `${user.displayName || "Player"}'s character` : "New combatant",
       conditions: [],
       hp: 10,
+      tempHp: 0,
       maxHp: 10,
       ac: 10,
       exhaustionLevel: 0,
@@ -1028,6 +1029,7 @@ function CombatantRow({
   };
   const conditions = normalizeConditions(combatant.conditions);
   const exhaustionLevel = combatant.exhaustionLevel ?? 0;
+  const tempHp = combatant.tempHp ?? 0;
   const concentrationPrompt = combatant.concentrationPrompt ?? null;
   const shouldShowConcentrationPrompt =
     Boolean(concentrationPrompt) && concentrationPrompt?.ownerUid === currentUserId;
@@ -1084,12 +1086,18 @@ function CombatantRow({
     const amount = Number(hpActionAmount);
     if (!Number.isFinite(amount) || amount <= 0) return;
 
+    const damageToTempHp = direction === "damage" ? Math.min(tempHp, amount) : 0;
+    const remainingDamage = direction === "damage" ? amount - damageToTempHp : 0;
     const nextHp =
       direction === "damage"
-        ? Math.max(0, combatant.hp - amount)
+        ? Math.max(0, combatant.hp - remainingDamage)
         : Math.min(combatant.maxHp, combatant.hp + amount);
 
     const patch: Partial<Combatant> = { hp: nextHp };
+
+    if (direction === "damage") {
+      patch.tempHp = Math.max(0, tempHp - damageToTempHp);
+    }
 
     if (direction === "damage" && conditions.some((condition) => condition.name === "concentration")) {
       patch.concentrationPrompt = {
@@ -1250,6 +1258,16 @@ function CombatantRow({
                 </label>
               ) : (
                 <>
+                  <label className="inline-stat-field">
+                    <span>Temp HP</span>
+                    <input
+                      type="number"
+                      value={tempHp}
+                      disabled={!canEdit}
+                      onChange={(event) => onUpdate({ tempHp: Number(event.target.value) })}
+                      aria-label={`${combatant.name} temporary HP`}
+                    />
+                  </label>
                   <label className="inline-stat-field">
                     <span>HP</span>
                     <input

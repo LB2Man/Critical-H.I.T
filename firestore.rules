@@ -43,7 +43,7 @@ service cloud.firestore {
 
     function ownedCombatantEditOnly() {
       return request.resource.data.diff(resource.data).changedKeys()
-        .hasOnly(['initiative', 'name', 'hp', 'maxHp', 'ac', 'conditions', 'concentrationPrompt', 'exhaustionLevel', 'updatedAt']);
+        .hasOnly(['initiative', 'name', 'hp', 'tempHp', 'maxHp', 'ac', 'conditions', 'concentrationPrompt', 'exhaustionLevel', 'updatedAt']);
     }
 
     match /users/{userId} {
