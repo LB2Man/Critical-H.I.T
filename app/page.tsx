@@ -859,7 +859,6 @@ function RoomView({ room, user, onBack }: { room: Room; user: User; onBack: () =
           Campaigns
         </button>
         <div>
-          <p className="eyebrow">Initiative</p>
           <h1>{room.name}</h1>
         </div>
         <div className="round-display">Round {room.round}</div>
@@ -867,17 +866,17 @@ function RoomView({ room, user, onBack }: { room: Room; user: User; onBack: () =
 
       <nav className="tabs" aria-label="Room tools">
         <button
-          className={`tab${activeTab === "initiative" ? " active" : ""}`}
-          onClick={() => setActiveTab("initiative")}
-        >
-          Initiative
-        </button>
-        <button
           className={`tab${activeTab === "invite" ? " active" : ""}`}
           onClick={() => setActiveTab("invite")}
           disabled={!isCreator}
         >
           Invite Player
+        </button>
+        <button
+          className={`tab${activeTab === "initiative" ? " active" : ""}`}
+          onClick={() => setActiveTab("initiative")}
+        >
+          Initiative
         </button>
       </nav>
 
