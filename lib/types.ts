@@ -12,6 +12,7 @@ export const CONDITIONS = [
   "restrained",
   "stunned",
   "concentration",
+  "custom",
 ] as const;
 
 export type Condition = (typeof CONDITIONS)[number];
