@@ -941,7 +941,7 @@ summary {
 
 .combat-row {
   position: relative;
-  grid-template-columns: 2.2rem minmax(4.4rem, 0.26fr) minmax(16rem, 0.9fr) minmax(39rem, 1.15fr) 2.6rem;
+  grid-template-columns: 2.2rem minmax(4.4rem, 0.24fr) minmax(22rem, 1.15fr) minmax(34rem, 1fr) 2.6rem;
   min-width: 1160px;
   column-gap: 0.55rem;
   align-items: end;
@@ -972,7 +972,7 @@ summary {
 }
 
 .name-input {
-  width: min(22rem, 100%);
+  width: min(34rem, 100%);
   border: 0;
   background: transparent;
   padding: 0;
@@ -987,7 +987,7 @@ summary {
 
 .name-combobox {
   position: relative;
-  width: min(22rem, 100%);
+  width: min(34rem, 100%);
 }
 
 .name-combobox .name-input {
