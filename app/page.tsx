@@ -13,6 +13,7 @@ import {
 import {
   SortableContext,
   arrayMove,
+  rectSortingStrategy,
   sortableKeyboardCoordinates,
   useSortable,
   verticalListSortingStrategy,
@@ -468,7 +469,7 @@ function RoomsView({
       </form>
 
       <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleCampaignDragEnd}>
-        <SortableContext items={rooms.map((room) => room.id)} strategy={verticalListSortingStrategy}>
+        <SortableContext items={rooms.map((room) => room.id)} strategy={rectSortingStrategy}>
           <div className="rooms-grid">
             {rooms.map((room) => (
               <CampaignCard
