@@ -44,21 +44,30 @@ import {
   GripVertical,
   HeartPulse,
   LogOut,
+  Moon,
   Plus,
   RotateCcw,
+  Settings,
   Shield,
   Skull,
   SortDesc,
   Sword,
   Trash2,
+  Globe2,
 } from "lucide-react";
 import { auth, db, firebaseReady, googleProvider } from "../lib/firebase";
 import {
   Combatant,
   Condition,
   ActiveCondition,
+  CalendarEvent,
+  CalendarDate,
+  CalendarMonth,
+  CalendarWeekday,
+  CampaignCalendar,
   HpVisibility,
   Room,
+  Season,
   StatBlock,
   CONDITIONS,
   activeConditionLabel,
@@ -68,7 +77,7 @@ import {
 } from "../lib/types";
 
 type View = "rooms" | "room";
-type RoomTab = "initiative" | "invite" | "statBlocks";
+type RoomTab = "initiative" | "invite" | "statBlocks" | "calendar";
 
 export default function Home() {
   const [user, setUser] = useState<User | null>(null);
@@ -257,9 +266,15 @@ export default function Home() {
 
     const combatants = await getDocs(collection(db, "rooms", roomId, "combatants"));
     const statBlocks = await getDocs(collection(db, "rooms", roomId, "statBlocks"));
+    const calendars = await getDocs(collection(db, "rooms", roomId, "calendars"));
     const batch = writeBatch(db);
     combatants.docs.forEach((combatant) => batch.delete(combatant.ref));
     statBlocks.docs.forEach((statBlock) => batch.delete(statBlock.ref));
+    for (const calendar of calendars.docs) {
+      const events = await getDocs(collection(db, "rooms", roomId, "calendars", calendar.id, "events"));
+      events.docs.forEach((event) => batch.delete(event.ref));
+      batch.delete(calendar.ref);
+    }
     batch.delete(doc(db, "rooms", roomId));
     await batch.commit();
 
@@ -654,10 +669,15 @@ function RoomView({ room, user, onBack }: { room: Room; user: User; onBack: () =
   const isCreator = room.creatorUid === user.uid;
   const [combatants, setCombatants] = useState<Combatant[]>([]);
   const [statBlocks, setStatBlocks] = useState<StatBlock[]>([]);
+  const [calendars, setCalendars] = useState<CampaignCalendar[]>([]);
   const [inviteEmail, setInviteEmail] = useState("");
   const [activeTab, setActiveTab] = useState<RoomTab>("initiative");
   const [activeStatBlockId, setActiveStatBlockId] = useState<string | null>(null);
   const [deleteStatBlockId, setDeleteStatBlockId] = useState<string | null>(null);
+  const [activeCalendarId, setActiveCalendarId] = useState<string | null>(null);
+  const [deleteCalendarId, setDeleteCalendarId] = useState<string | null>(null);
+  const [creatingCalendar, setCreatingCalendar] = useState(false);
+  const [editingCalendarId, setEditingCalendarId] = useState<string | null>(null);
 
   useEffect(() => {
     const combatantsQuery = query(
@@ -693,6 +713,25 @@ function RoomView({ room, user, onBack }: { room: Room; user: User; onBack: () =
       );
     });
   }, [isCreator, room.id]);
+
+  useEffect(() => {
+    const calendarsQuery = query(collection(db, "rooms", room.id, "calendars"));
+
+    return onSnapshot(calendarsQuery, (snapshot) => {
+      setCalendars(
+        snapshot.docs
+          .map((item) => ({ id: item.id, ...item.data() }) as CampaignCalendar)
+          .sort((a, b) => {
+            const aOrder = typeof a.order === "number" ? a.order : null;
+            const bOrder = typeof b.order === "number" ? b.order : null;
+            if (aOrder !== null && bOrder !== null) return aOrder - bOrder;
+            if (aOrder !== null) return -1;
+            if (bOrder !== null) return 1;
+            return a.name.localeCompare(b.name);
+          }),
+      );
+    });
+  }, [room.id]);
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
@@ -760,6 +799,38 @@ function RoomView({ room, user, onBack }: { room: Room; user: User; onBack: () =
       updatedAt: serverTimestamp(),
     });
     setActiveStatBlockId(statBlockRef.id);
+  }
+
+  async function addCalendar(calendar: Omit<CampaignCalendar, "id" | "order">) {
+    if (!isCreator) return;
+    const order = calendars.length ? Math.max(...calendars.map((item) => item.order ?? 0)) + 1 : 0;
+    const calendarRef = await addDoc(collection(db, "rooms", room.id, "calendars"), {
+      ...calendar,
+      order,
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    });
+    setActiveCalendarId(calendarRef.id);
+    setCreatingCalendar(false);
+  }
+
+  async function updateCalendar(id: string, patch: Partial<CampaignCalendar>) {
+    await updateDoc(doc(db, "rooms", room.id, "calendars", id), {
+      ...patch,
+      updatedAt: serverTimestamp(),
+    });
+  }
+
+  async function removeCalendar(id: string) {
+    if (!isCreator) return;
+    const events = await getDocs(collection(db, "rooms", room.id, "calendars", id, "events"));
+    const batch = writeBatch(db);
+    events.docs.forEach((event) => batch.delete(event.ref));
+    batch.delete(doc(db, "rooms", room.id, "calendars", id));
+    await batch.commit();
+    if (activeCalendarId === id) setActiveCalendarId(null);
+    if (editingCalendarId === id) setEditingCalendarId(null);
+    setDeleteCalendarId(null);
   }
 
   async function updateStatBlock(id: string, patch: Partial<StatBlock>) {
@@ -922,6 +993,51 @@ function RoomView({ room, user, onBack }: { room: Room; user: User; onBack: () =
     await batch.commit();
   }
 
+  async function handleCalendarDragEnd(event: DragEndEvent) {
+    if (!isCreator) return;
+
+    const { active, over } = event;
+    if (!over || active.id === over.id) return;
+
+    const oldIndex = calendars.findIndex((calendar) => calendar.id === active.id);
+    const newIndex = calendars.findIndex((calendar) => calendar.id === over.id);
+    if (oldIndex < 0 || newIndex < 0) return;
+
+    const reordered = arrayMove(calendars, oldIndex, newIndex);
+    const batch = writeBatch(db);
+
+    reordered.forEach((calendar, index) => {
+      batch.update(doc(db, "rooms", room.id, "calendars", calendar.id), {
+        order: index,
+        updatedAt: serverTimestamp(),
+      });
+    });
+
+    await batch.commit();
+  }
+
+  async function addCalendarEvent(calendarId: string, event: Omit<CalendarEvent, "id" | "ownerUid" | "ownerEmail">) {
+    if (!user.email) return;
+    await addDoc(collection(db, "rooms", room.id, "calendars", calendarId, "events"), {
+      ...event,
+      ownerUid: user.uid,
+      ownerEmail: user.email,
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    });
+  }
+
+  async function updateCalendarEvent(calendarId: string, eventId: string, patch: Partial<CalendarEvent>) {
+    await updateDoc(doc(db, "rooms", room.id, "calendars", calendarId, "events", eventId), {
+      ...patch,
+      updatedAt: serverTimestamp(),
+    });
+  }
+
+  async function removeCalendarEvent(calendarId: string, eventId: string) {
+    await deleteDoc(doc(db, "rooms", room.id, "calendars", calendarId, "events", eventId));
+  }
+
   async function toggleVisibility(field: HpVisibility) {
     if (!isCreator) return;
     await updateDoc(doc(db, "rooms", room.id), {
@@ -948,7 +1064,7 @@ function RoomView({ room, user, onBack }: { room: Room; user: User; onBack: () =
         <div>
           <h1>{room.name}</h1>
         </div>
-        <div className="round-display">Round {room.round}</div>
+        {activeTab === "initiative" && <div className="round-display">Round {room.round}</div>}
       </div>
 
       <nav className="tabs" aria-label="Room tools">
@@ -980,6 +1096,12 @@ function RoomView({ room, user, onBack }: { room: Room; user: User; onBack: () =
           }}
         >
           Nexus Notes
+        </button>
+        <button
+          className={`tab${activeTab === "calendar" ? " active" : ""}`}
+          onClick={() => setActiveTab("calendar")}
+        >
+          Calendar
         </button>
       </nav>
 
@@ -1030,6 +1152,33 @@ function RoomView({ room, user, onBack }: { room: Room; user: User; onBack: () =
           onCancelDelete={() => setDeleteStatBlockId(null)}
           onDelete={removeStatBlock}
           onDragEnd={handleStatBlockDragEnd}
+        />
+      ) : activeTab === "calendar" ? (
+        <CalendarsTab
+          roomId={room.id}
+          calendars={calendars}
+          activeCalendarId={activeCalendarId}
+          deleteCalendarId={deleteCalendarId}
+          creatingCalendar={creatingCalendar}
+          editingCalendarId={editingCalendarId}
+          isCreator={isCreator}
+          user={user}
+          sensors={sensors}
+          onAdd={() => setCreatingCalendar(true)}
+          onCreate={addCalendar}
+          onOpen={setActiveCalendarId}
+          onBack={() => setActiveCalendarId(null)}
+          onUpdate={updateCalendar}
+          onRequestEdit={setEditingCalendarId}
+          onCloseEdit={() => setEditingCalendarId(null)}
+          onRequestDelete={setDeleteCalendarId}
+          onCancelDelete={() => setDeleteCalendarId(null)}
+          onDelete={removeCalendar}
+          onDragEnd={handleCalendarDragEnd}
+          onCancelCreate={() => setCreatingCalendar(false)}
+          onAddEvent={addCalendarEvent}
+          onUpdateEvent={updateCalendarEvent}
+          onDeleteEvent={removeCalendarEvent}
         />
       ) : (
         <div className="initiative-tab">
@@ -1244,6 +1393,1019 @@ function StatBlockCard({
       <span>{statBlock.title || "Name"}</span>
     </div>
   );
+}
+
+const SEASONS: Season[] = ["spring", "summer", "autumn", "winter"];
+
+function CalendarsTab({
+  roomId,
+  calendars,
+  activeCalendarId,
+  deleteCalendarId,
+  creatingCalendar,
+  editingCalendarId,
+  isCreator,
+  user,
+  sensors,
+  onAdd,
+  onCreate,
+  onOpen,
+  onBack,
+  onUpdate,
+  onRequestEdit,
+  onCloseEdit,
+  onRequestDelete,
+  onCancelDelete,
+  onDelete,
+  onDragEnd,
+  onCancelCreate,
+  onAddEvent,
+  onUpdateEvent,
+  onDeleteEvent,
+}: {
+  roomId: string;
+  calendars: CampaignCalendar[];
+  activeCalendarId: string | null;
+  deleteCalendarId: string | null;
+  creatingCalendar: boolean;
+  editingCalendarId: string | null;
+  isCreator: boolean;
+  user: User;
+  sensors: ReturnType<typeof useSensors>;
+  onAdd: () => void;
+  onCreate: (calendar: Omit<CampaignCalendar, "id" | "order">) => void;
+  onOpen: (id: string) => void;
+  onBack: () => void;
+  onUpdate: (id: string, patch: Partial<CampaignCalendar>) => void;
+  onRequestEdit: (id: string) => void;
+  onCloseEdit: () => void;
+  onRequestDelete: (id: string) => void;
+  onCancelDelete: () => void;
+  onDelete: (id: string) => void;
+  onDragEnd: (event: DragEndEvent) => void;
+  onCancelCreate: () => void;
+  onAddEvent: (calendarId: string, event: Omit<CalendarEvent, "id" | "ownerUid" | "ownerEmail">) => void;
+  onUpdateEvent: (calendarId: string, eventId: string, patch: Partial<CalendarEvent>) => void;
+  onDeleteEvent: (calendarId: string, eventId: string) => void;
+}) {
+  const activeCalendar = calendars.find((calendar) => calendar.id === activeCalendarId) || null;
+  const deleteCalendar = calendars.find((calendar) => calendar.id === deleteCalendarId) || null;
+  const editingCalendar = calendars.find((calendar) => calendar.id === editingCalendarId) || null;
+
+  return (
+    <section className="calendars-tab">
+      {activeCalendar ? (
+        <CalendarView
+          roomId={roomId}
+          calendar={activeCalendar}
+          isCreator={isCreator}
+          user={user}
+          onBack={onBack}
+          onUpdate={(patch) => onUpdate(activeCalendar.id, patch)}
+          onRequestEdit={() => onRequestEdit(activeCalendar.id)}
+          onAddEvent={(event) => onAddEvent(activeCalendar.id, event)}
+          onUpdateEvent={(eventId, patch) => onUpdateEvent(activeCalendar.id, eventId, patch)}
+          onDeleteEvent={(eventId) => onDeleteEvent(activeCalendar.id, eventId)}
+        />
+      ) : (
+        <>
+          <div className="stat-block-toolbar">
+            {isCreator && (
+              <button className="tool-button" onClick={onAdd}>
+                <Plus aria-hidden="true" />
+                Add
+              </button>
+            )}
+          </div>
+
+          <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onDragEnd}>
+            <SortableContext items={calendars.map((calendar) => calendar.id)} strategy={rectSortingStrategy}>
+              <div className="stat-block-grid">
+                {calendars.map((calendar) => (
+                  <CalendarCard
+                    key={calendar.id}
+                    calendar={calendar}
+                    isCreator={isCreator}
+                    onOpen={onOpen}
+                    onRequestDelete={onRequestDelete}
+                  />
+                ))}
+                {calendars.length === 0 && <div className="empty-state">No calendars yet.</div>}
+              </div>
+            </SortableContext>
+          </DndContext>
+        </>
+      )}
+
+      {creatingCalendar && (
+        <CalendarSettingsModal
+          calendar={null}
+          existingCalendars={calendars}
+          onCancel={onCancelCreate}
+          onSave={onCreate}
+        />
+      )}
+
+      {editingCalendar && (
+        <CalendarSettingsModal
+          calendar={editingCalendar}
+          existingCalendars={calendars}
+          onCancel={onCloseEdit}
+          onSave={(calendar) => {
+            onUpdate(editingCalendar.id, calendar);
+            onCloseEdit();
+          }}
+        />
+      )}
+
+      {deleteCalendar && (
+        <div className="modal-backdrop" role="presentation">
+          <div className="confirm-modal" role="dialog" aria-modal="true" aria-labelledby="delete-calendar-title">
+            <h2 id="delete-calendar-title">Delete calendar?</h2>
+            <p>This will remove {deleteCalendar.name || "this calendar"} and all of its events.</p>
+            <div className="confirm-actions">
+              <button className="subtle-button" onClick={onCancelDelete}>
+                Cancel
+              </button>
+              <button className="tool-button danger" onClick={() => onDelete(deleteCalendar.id)}>
+                Delete
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </section>
+  );
+}
+
+function CalendarCard({
+  calendar,
+  isCreator,
+  onOpen,
+  onRequestDelete,
+}: {
+  calendar: CampaignCalendar;
+  isCreator: boolean;
+  onOpen: (id: string) => void;
+  onRequestDelete: (id: string) => void;
+}) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
+    id: calendar.id,
+    disabled: !isCreator,
+  });
+
+  const stopCardGesture = (event: React.SyntheticEvent) => {
+    event.stopPropagation();
+  };
+
+  return (
+    <div
+      ref={setNodeRef}
+      className={`stat-block-card${isDragging ? " dragging" : ""}`}
+      style={{
+        transform: CSS.Transform.toString(transform),
+        transition,
+      }}
+      onClick={() => onOpen(calendar.id)}
+      onKeyDown={(event) => {
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          onOpen(calendar.id);
+        }
+      }}
+      {...attributes}
+      {...listeners}
+    >
+      <div className="stat-block-card-top">
+        <GlobeIcon />
+        {isCreator && (
+          <button
+            className="icon-button danger"
+            title="Delete calendar"
+            onPointerDown={stopCardGesture}
+            onKeyDown={stopCardGesture}
+            onClick={(event) => {
+              event.stopPropagation();
+              onRequestDelete(calendar.id);
+            }}
+          >
+            <Trash2 aria-hidden="true" />
+          </button>
+        )}
+      </div>
+      <span>{calendar.name || "Calendar"}</span>
+      <small>
+        {calendar.currentYear} {calendar.eraName}
+      </small>
+    </div>
+  );
+}
+
+function CalendarSettingsModal({
+  calendar,
+  existingCalendars,
+  onCancel,
+  onSave,
+}: {
+  calendar: CampaignCalendar | null;
+  existingCalendars: CampaignCalendar[];
+  onCancel: () => void;
+  onSave: (calendar: Omit<CampaignCalendar, "id" | "order">) => void;
+}) {
+  const initial = calendar || createDefaultCalendar(existingCalendars);
+  const [name, setName] = useState(initial.name);
+  const [eraName, setEraName] = useState(initial.eraName);
+  const [currentYear, setCurrentYear] = useState(initial.currentYear);
+  const [daysPerWeek, setDaysPerWeek] = useState(initial.daysPerWeek);
+  const [daysPerMonth, setDaysPerMonth] = useState(initial.daysPerMonth);
+  const [months, setMonths] = useState<CalendarMonth[]>(sortMonths(initial.months));
+  const [weekdays, setWeekdays] = useState<CalendarWeekday[]>(sortWeekdays(initial.weekdays));
+  const [error, setError] = useState("");
+  const [confirmDiscard, setConfirmDiscard] = useState(false);
+  const initialSignature = useRef(calendarSettingsSignature(initial));
+
+  function setMonthCount(count: number) {
+    const nextCount = Math.max(1, Math.min(36, count || 1));
+    setMonths((current) =>
+      Array.from({ length: nextCount }, (_, index) => {
+        const existing = current[index];
+        return existing || { id: crypto.randomUUID(), name: `Month ${index + 1}`, season: "spring", order: index };
+      }).map((month, index) => ({ ...month, order: index })),
+    );
+  }
+
+  function setWeekdayCount(count: number) {
+    const nextCount = Math.max(1, Math.min(14, count || 1));
+    setDaysPerWeek(nextCount);
+    setWeekdays((current) =>
+      Array.from({ length: nextCount }, (_, index) => {
+        const existing = current[index];
+        return existing || { id: crypto.randomUUID(), name: `Day ${index + 1}`, order: index };
+      }).map((weekday, index) => ({ ...weekday, order: index })),
+    );
+  }
+
+  const currentSignature = calendarSettingsSignature({
+    name,
+    eraName,
+    currentYear,
+    daysPerWeek,
+    daysPerMonth,
+    months,
+    weekdays,
+    today: initial.today,
+  });
+  const hasUnsavedChanges = currentSignature !== initialSignature.current;
+
+  function requestCancel() {
+    if (hasUnsavedChanges) {
+      setConfirmDiscard(true);
+      return;
+    }
+
+    onCancel();
+  }
+
+  function save(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const trimmedName = name.trim();
+    if (!trimmedName) {
+      setError("Please name this calendar.");
+      return;
+    }
+
+    const normalizedName = trimmedName.toLowerCase();
+    if (existingCalendars.some((item) => item.id !== calendar?.id && item.name.trim().toLowerCase() === normalizedName)) {
+      setError("A calendar with this name already exists.");
+      return;
+    }
+
+    const sortedMonths = sortMonths(months);
+    onSave({
+      name: trimmedName,
+      eraName: eraName.trim() || "Era",
+      currentYear: Number(currentYear) || 1,
+      daysPerWeek: Math.max(1, Number(daysPerWeek) || 1),
+      daysPerMonth: Math.max(1, Number(daysPerMonth) || 1),
+      months: sortedMonths,
+      weekdays: sortWeekdays(weekdays),
+      today:
+        calendar?.today?.monthId && sortedMonths.some((month) => month.id === calendar.today.monthId)
+          ? { ...calendar.today, year: Number(currentYear) || 1 }
+          : { year: Number(currentYear) || 1, monthId: sortedMonths[0]?.id || "", day: 1 },
+    });
+  }
+
+  return (
+    <div className="modal-backdrop" role="presentation">
+      <form className="calendar-settings-modal" onSubmit={save}>
+        <div className="stat-block-modal-header">
+          <div className="stat-block-title-area">
+            <h2>{calendar ? "Edit Calendar" : "Create Calendar"}</h2>
+          </div>
+          <div className="stat-block-modal-actions">
+            <button className="tool-button" type="submit">
+              Save
+            </button>
+            <button className="subtle-button" type="button" onClick={requestCancel}>
+              Cancel
+            </button>
+          </div>
+        </div>
+        {error && <p className="field-error">{error}</p>}
+        <div className="calendar-settings-grid">
+          <label className="field-stack">
+            <span>Name</span>
+            <input value={name} onChange={(event) => setName(event.target.value)} />
+          </label>
+          <label className="field-stack">
+            <span>Era</span>
+            <input value={eraName} onChange={(event) => setEraName(event.target.value)} />
+          </label>
+          <label className="field-stack">
+            <span>Current Year</span>
+            <input type="number" value={currentYear} onChange={(event) => setCurrentYear(Number(event.target.value))} />
+          </label>
+          <label className="field-stack">
+            <span>Days A Week</span>
+            <input type="number" min="1" max="14" value={daysPerWeek} onChange={(event) => setWeekdayCount(Number(event.target.value))} />
+          </label>
+          <label className="field-stack">
+            <span>Days A Month</span>
+            <input type="number" min="1" value={daysPerMonth} onChange={(event) => setDaysPerMonth(Number(event.target.value))} />
+          </label>
+          <label className="field-stack">
+            <span>Months</span>
+            <input type="number" min="1" max="36" value={months.length} onChange={(event) => setMonthCount(Number(event.target.value))} />
+          </label>
+        </div>
+        <div className="calendar-settings-lists">
+          <section>
+            <h3>Months</h3>
+            <div className="calendar-name-list">
+              {months.map((month, index) => (
+                <div className="calendar-name-row" key={month.id}>
+                  <input
+                    value={month.name}
+                    onChange={(event) =>
+                      setMonths(months.map((item) => (item.id === month.id ? { ...item, name: event.target.value } : item)))
+                    }
+                    aria-label={`Month ${index + 1} name`}
+                  />
+                  <select
+                    value={month.season}
+                    onChange={(event) =>
+                      setMonths(
+                        months.map((item) =>
+                          item.id === month.id ? { ...item, season: event.target.value as Season } : item,
+                        ),
+                      )
+                    }
+                    aria-label={`${month.name} season`}
+                  >
+                    {SEASONS.map((season) => (
+                      <option key={season} value={season}>
+                        {titleCase(season)}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              ))}
+            </div>
+          </section>
+          <section>
+            <h3>Weekdays</h3>
+            <div className="calendar-name-list">
+              {weekdays.map((weekday, index) => (
+                <div className="calendar-name-row compact" key={weekday.id}>
+                  <input
+                    value={weekday.name}
+                    onChange={(event) =>
+                      setWeekdays(
+                        weekdays.map((item) => (item.id === weekday.id ? { ...item, name: event.target.value } : item)),
+                      )
+                    }
+                    aria-label={`Weekday ${index + 1} name`}
+                  />
+                </div>
+              ))}
+            </div>
+          </section>
+        </div>
+      </form>
+      {confirmDiscard && (
+        <div className="modal-backdrop nested-modal" role="presentation" onClick={(event) => event.stopPropagation()}>
+          <div className="confirm-modal" role="dialog" aria-modal="true" aria-labelledby="discard-calendar-title">
+            <h2 id="discard-calendar-title">Close without saving?</h2>
+            <p>Your calendar changes will be lost if you close now.</p>
+            <div className="confirm-actions">
+              <button className="subtle-button" onClick={() => setConfirmDiscard(false)}>
+                Cancel
+              </button>
+              <button className="tool-button danger" onClick={onCancel}>
+                Close Without Saving
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function CalendarView({
+  roomId,
+  calendar,
+  isCreator,
+  user,
+  onBack,
+  onUpdate,
+  onRequestEdit,
+  onAddEvent,
+  onUpdateEvent,
+  onDeleteEvent,
+}: {
+  roomId: string;
+  calendar: CampaignCalendar;
+  isCreator: boolean;
+  user: User;
+  onBack: () => void;
+  onUpdate: (patch: Partial<CampaignCalendar>) => void;
+  onRequestEdit: () => void;
+  onAddEvent: (event: Omit<CalendarEvent, "id" | "ownerUid" | "ownerEmail">) => void;
+  onUpdateEvent: (eventId: string, patch: Partial<CalendarEvent>) => void;
+  onDeleteEvent: (eventId: string) => void;
+}) {
+  const [events, setEvents] = useState<CalendarEvent[]>([]);
+  const [contextMenu, setContextMenu] = useState<{ x: number; y: number; date: CalendarDate } | null>(null);
+  const [activeDay, setActiveDay] = useState<CalendarDate | null>(null);
+  const [eventDraft, setEventDraft] = useState<{ date: CalendarDate; event?: CalendarEvent } | null>(null);
+  const months = sortMonths(calendar.months);
+  const weekdays = sortWeekdays(calendar.weekdays);
+
+  useEffect(() => {
+    return onSnapshot(collection(db, "rooms", roomId, "calendars", calendar.id, "events"), (snapshot) => {
+      setEvents(snapshot.docs.map((item) => ({ id: item.id, ...item.data() }) as CalendarEvent));
+    });
+  }, [calendar.id, roomId]);
+
+  function setToday(date: CalendarDate) {
+    onUpdate({ today: date, currentYear: date.year });
+    setContextMenu(null);
+  }
+
+  function longRest() {
+    const nextDate = nextCalendarDate(calendar, months);
+    onUpdate({ today: nextDate, currentYear: nextDate.year });
+  }
+
+  function changeYear(delta: number) {
+    const nextYear = calendar.today.year + delta;
+    onUpdate({
+      currentYear: nextYear,
+      today: { ...calendar.today, year: nextYear },
+    });
+  }
+
+  return (
+    <section className="calendar-view" onClick={() => setContextMenu(null)}>
+      <div className="calendar-view-toolbar">
+        <button className="subtle-button" onClick={onBack}>
+          <ChevronLeft aria-hidden="true" />
+          Calendars
+        </button>
+        <div>
+          <h2>{calendar.name}</h2>
+          <p>
+            {calendar.today.year} {calendar.eraName}
+          </p>
+        </div>
+        <div className="calendar-year-controls">
+          <button className="icon-button" onClick={() => changeYear(-10)} title="Back 10 years">
+            -10
+          </button>
+          <button className="icon-button" onClick={() => changeYear(-1)} title="Previous year">
+            <ChevronLeft aria-hidden="true" />
+          </button>
+          <button className="icon-button" onClick={() => changeYear(1)} title="Next year">
+            <ChevronRight aria-hidden="true" />
+          </button>
+          <button className="icon-button" onClick={() => changeYear(10)} title="Forward 10 years">
+            +10
+          </button>
+        </div>
+        <button className="primary-action" onClick={longRest}>
+          <Moon aria-hidden="true" />
+          Long Rest
+        </button>
+        {isCreator && (
+          <button className="tool-button" onClick={onRequestEdit}>
+            <Settings aria-hidden="true" />
+            Settings
+          </button>
+        )}
+      </div>
+
+      <div className="calendar-months">
+        {months.map((month) => (
+          <section className={`calendar-month season-${month.season}`} key={month.id}>
+            <div className="calendar-month-header">
+              <h3>{month.name}</h3>
+              <span>{titleCase(month.season)}</span>
+            </div>
+            <div
+              className="calendar-weekday-row"
+              style={{ gridTemplateColumns: `repeat(${Math.max(1, weekdays.length)}, minmax(0, 1fr))` }}
+            >
+              {weekdays.map((weekday) => (
+                <span key={weekday.id}>{weekday.name}</span>
+              ))}
+            </div>
+            <div
+              className="calendar-days"
+              style={{ gridTemplateColumns: `repeat(${Math.max(1, weekdays.length)}, minmax(0, 1fr))` }}
+            >
+              {Array.from({ length: Math.max(1, calendar.daysPerMonth) }, (_, index) => {
+                const day = index + 1;
+                const date = { year: calendar.today.year, monthId: month.id, day };
+                const dayEvents = events.filter((event) => eventMatchesDate(event, date));
+                const isToday =
+                  calendar.today.year === date.year &&
+                  calendar.today.monthId === month.id &&
+                  calendar.today.day === day;
+
+                return (
+                  <button
+                    className={`calendar-day${isToday ? " today" : ""}`}
+                    key={`${month.id}-${day}`}
+                    type="button"
+                    onContextMenu={(event) => {
+                      event.preventDefault();
+                      setContextMenu({ x: event.clientX, y: event.clientY, date });
+                    }}
+                    onClick={() => setActiveDay(date)}
+                  >
+                    <span>{day}</span>
+                    <div className="calendar-event-list">
+                      {dayEvents.map((event) => (
+                        <span
+                          className="calendar-event-pill"
+                          key={event.id}
+                          style={{ borderColor: event.color, backgroundColor: `${event.color}33` }}
+                          onClick={(clickEvent) => {
+                            clickEvent.stopPropagation();
+                            setEventDraft({ date, event });
+                          }}
+                        >
+                          {event.title}
+                        </span>
+                      ))}
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          </section>
+        ))}
+      </div>
+
+      {contextMenu && (
+        <div className="calendar-context-menu" style={{ left: contextMenu.x, top: contextMenu.y }}>
+          <button onClick={() => setEventDraft({ date: contextMenu.date })}>Add Event</button>
+          <button onClick={() => setToday(contextMenu.date)}>Set as Today</button>
+        </div>
+      )}
+
+      {activeDay && (
+        <CalendarDayEventsModal
+          date={activeDay}
+          events={events.filter((event) => eventMatchesDate(event, activeDay))}
+          monthName={months.find((month) => month.id === activeDay.monthId)?.name || "Month"}
+          onClose={() => setActiveDay(null)}
+          onAdd={() => {
+            setEventDraft({ date: activeDay });
+            setActiveDay(null);
+          }}
+          onEdit={(event) => {
+            setEventDraft({ date: activeDay, event });
+            setActiveDay(null);
+          }}
+          onDelete={(eventId) => {
+            setEvents((currentEvents) => currentEvents.filter((event) => event.id !== eventId));
+            onDeleteEvent(eventId);
+          }}
+        />
+      )}
+
+      {eventDraft && (
+        <CalendarEventModal
+          event={eventDraft.event}
+          date={eventDraft.date}
+          user={user}
+          onClose={() => setEventDraft(null)}
+          onSave={(event) => {
+            if (eventDraft.event) {
+              setEvents((currentEvents) =>
+                currentEvents.map((currentEvent) =>
+                  currentEvent.id === eventDraft.event!.id ? { ...currentEvent, ...event } : currentEvent,
+                ),
+              );
+              onUpdateEvent(eventDraft.event.id, event);
+            } else {
+              const optimisticEvent: CalendarEvent = {
+                ...event,
+                id: `pending-${Date.now()}`,
+                ownerUid: user.uid,
+                ownerEmail: user.email || "",
+              };
+              setEvents((currentEvents) => [...currentEvents, optimisticEvent]);
+              Promise.resolve(onAddEvent(event)).catch(() => {
+                setEvents((currentEvents) => currentEvents.filter((currentEvent) => currentEvent.id !== optimisticEvent.id));
+              });
+            }
+            setEventDraft(null);
+          }}
+          onDelete={
+            eventDraft.event
+              ? () => {
+                  onDeleteEvent(eventDraft.event!.id);
+                  setEventDraft(null);
+                }
+              : undefined
+          }
+        />
+      )}
+    </section>
+  );
+}
+
+function CalendarEventModal({
+  event,
+  date,
+  user,
+  onClose,
+  onSave,
+  onDelete,
+}: {
+  event?: CalendarEvent;
+  date: CalendarDate;
+  user: User;
+  onClose: () => void;
+  onSave: (event: Omit<CalendarEvent, "id" | "ownerUid" | "ownerEmail">) => void;
+  onDelete?: () => void;
+}) {
+  const [title, setTitle] = useState(event?.title || "");
+  const [notes, setNotes] = useState(event?.notes || "");
+  const [color, setColor] = useState(event?.color || "#c51a2a");
+  const [recursYearly, setRecursYearly] = useState(Boolean(event?.recursYearly));
+  const [error, setError] = useState("");
+  const [confirmDiscard, setConfirmDiscard] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const initialSignature = useRef(calendarEventSignature(event, date));
+  const currentSignature = calendarEventSignature(
+    {
+      ...(event || {
+        id: "",
+        ownerUid: user.uid,
+        ownerEmail: user.email || "",
+      }),
+      ...date,
+      title,
+      notes,
+      color,
+      recursYearly,
+    },
+    date,
+  );
+  const hasUnsavedChanges = currentSignature !== initialSignature.current;
+
+  function requestClose() {
+    if (hasUnsavedChanges) {
+      setConfirmDiscard(true);
+      return;
+    }
+
+    onClose();
+  }
+
+  function save(submitEvent: React.FormEvent<HTMLFormElement>) {
+    submitEvent.preventDefault();
+    const trimmedTitle = title.trim();
+    if (!trimmedTitle) {
+      setError("Please name this event.");
+      return;
+    }
+
+    onSave({
+      ...date,
+      title: trimmedTitle,
+      notes: notes.trim(),
+      color,
+      recursYearly,
+    });
+  }
+
+  return (
+    <div className="modal-backdrop" role="presentation" onClick={requestClose}>
+      <form className="calendar-event-modal" onSubmit={save} onClick={(clickEvent) => clickEvent.stopPropagation()}>
+        <div className="stat-block-modal-header">
+          <div className="stat-block-title-area">
+            <h2>{event ? "Edit Event" : "Add Event"}</h2>
+            <p>
+              Day {date.day}, Year {date.year}
+            </p>
+          </div>
+          <div className="stat-block-modal-actions">
+            <button className="tool-button" type="submit">
+              Save
+            </button>
+            <button className="subtle-button" type="button" onClick={requestClose}>
+              Close
+            </button>
+          </div>
+        </div>
+        {error && <p className="field-error">{error}</p>}
+        <label className="field-stack">
+          <span>Title</span>
+          <input value={title} onChange={(inputEvent) => setTitle(inputEvent.target.value)} />
+        </label>
+        <label className="calendar-checkbox">
+          <input
+            type="checkbox"
+            checked={recursYearly}
+            onChange={(inputEvent) => setRecursYearly(inputEvent.target.checked)}
+          />
+          <span>Recurring every year</span>
+        </label>
+        <label className="field-stack">
+          <span>Notes</span>
+          <textarea value={notes} onChange={(inputEvent) => setNotes(inputEvent.target.value)} />
+        </label>
+        <label className="field-stack color-field">
+          <span>Color</span>
+          <div className="calendar-color-control">
+            <input type="color" value={color} onChange={(inputEvent) => setColor(inputEvent.target.value)} />
+            <input
+              type="text"
+              value={color}
+              onChange={(inputEvent) => setColor(inputEvent.target.value)}
+              aria-label="Event color hex value"
+            />
+          </div>
+          <div className="calendar-color-swatches">
+            {["#c51a2a", "#d16728", "#d5a11f", "#2f8f4e", "#2f7fb8", "#8c4bd6", "#cf1ead"].map((swatch) => (
+              <button
+                key={swatch}
+                type="button"
+                className={color.toLowerCase() === swatch ? "active" : ""}
+                style={{ backgroundColor: swatch }}
+                onClick={() => setColor(swatch)}
+                aria-label={`Use color ${swatch}`}
+              />
+            ))}
+          </div>
+        </label>
+        <small>Created by {user.displayName || user.email}</small>
+        {onDelete && (
+          <button className="tool-button danger" type="button" onClick={() => setConfirmDelete(true)}>
+            <Trash2 aria-hidden="true" />
+            Delete Event
+          </button>
+        )}
+      </form>
+      {confirmDiscard && (
+        <div className="modal-backdrop nested-modal" role="presentation" onClick={(clickEvent) => clickEvent.stopPropagation()}>
+          <div className="confirm-modal" role="dialog" aria-modal="true" aria-labelledby="discard-calendar-event-title">
+            <h2 id="discard-calendar-event-title">Close without saving?</h2>
+            <p>Your event changes will be lost if you close now.</p>
+            <div className="confirm-actions">
+              <button className="subtle-button" onClick={() => setConfirmDiscard(false)}>
+                Cancel
+              </button>
+              <button className="tool-button danger" onClick={onClose}>
+                Close Without Saving
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {confirmDelete && onDelete && (
+        <div className="modal-backdrop nested-modal" role="presentation" onClick={(clickEvent) => clickEvent.stopPropagation()}>
+          <div className="confirm-modal" role="dialog" aria-modal="true" aria-labelledby="delete-calendar-event-title">
+            <h2 id="delete-calendar-event-title">Delete event?</h2>
+            <p>This will remove {title || "this event"}.</p>
+            <div className="confirm-actions">
+              <button className="subtle-button" onClick={() => setConfirmDelete(false)}>
+                Cancel
+              </button>
+              <button className="tool-button danger" onClick={onDelete}>
+                Delete
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function CalendarDayEventsModal({
+  date,
+  events,
+  monthName,
+  onClose,
+  onAdd,
+  onEdit,
+  onDelete,
+}: {
+  date: CalendarDate;
+  events: CalendarEvent[];
+  monthName: string;
+  onClose: () => void;
+  onAdd: () => void;
+  onEdit: (event: CalendarEvent) => void;
+  onDelete: (eventId: string) => void;
+}) {
+  const [deleteEvent, setDeleteEvent] = useState<CalendarEvent | null>(null);
+
+  return (
+    <div className="modal-backdrop" role="presentation" onClick={onClose}>
+      <div className="calendar-day-modal" role="dialog" aria-modal="true" onClick={(event) => event.stopPropagation()}>
+        <div className="stat-block-modal-header">
+          <div className="stat-block-title-area">
+            <h2>
+              {monthName} {date.day}
+            </h2>
+            <p>Year {date.year}</p>
+          </div>
+          <div className="stat-block-modal-actions">
+            <button className="tool-button" type="button" onClick={onAdd}>
+              <Plus aria-hidden="true" />
+              Add Event
+            </button>
+            <button className="subtle-button" type="button" onClick={onClose}>
+              Close
+            </button>
+          </div>
+        </div>
+        <div className="day-event-list">
+          {events.length ? (
+            events.map((event) => (
+              <div className="day-event-row" key={event.id}>
+                <span className="event-color-dot" style={{ backgroundColor: event.color }} />
+                <div>
+                  <strong>{event.title}</strong>
+                  {event.notes && <p>{event.notes}</p>}
+                </div>
+                <button className="tool-button" type="button" onClick={() => onEdit(event)}>
+                  Edit
+                </button>
+                <button className="icon-button danger" type="button" onClick={() => setDeleteEvent(event)}>
+                  <Trash2 aria-hidden="true" />
+                </button>
+              </div>
+            ))
+          ) : (
+            <div className="empty-state">No events on this day.</div>
+          )}
+        </div>
+      </div>
+      {deleteEvent && (
+        <div className="modal-backdrop nested-modal" role="presentation" onClick={(event) => event.stopPropagation()}>
+          <div className="confirm-modal" role="dialog" aria-modal="true" aria-labelledby="delete-day-event-title">
+            <h2 id="delete-day-event-title">Delete event?</h2>
+            <p>Are you sure you want to delete {deleteEvent.title || "this event"}?</p>
+            <div className="confirm-actions">
+              <button className="subtle-button" onClick={() => setDeleteEvent(null)}>
+                Cancel
+              </button>
+              <button
+                className="tool-button danger"
+                onClick={() => {
+                  onDelete(deleteEvent.id);
+                  setDeleteEvent(null);
+                }}
+              >
+                Delete
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function createDefaultCalendar(existingCalendars: CampaignCalendar[]): Omit<CampaignCalendar, "id" | "order"> {
+  const name = nextDefaultCalendarName(existingCalendars);
+  const months = Array.from({ length: 12 }, (_, index) => ({
+    id: crypto.randomUUID(),
+    name: `Month ${index + 1}`,
+    season: SEASONS[Math.floor(index / 3)] || "winter",
+    order: index,
+  }));
+  const weekdays = Array.from({ length: 7 }, (_, index) => ({
+    id: crypto.randomUUID(),
+    name: `Day ${index + 1}`,
+    order: index,
+  }));
+
+  return {
+    name,
+    eraName: "Era",
+    currentYear: 1,
+    daysPerWeek: 7,
+    daysPerMonth: 30,
+    months,
+    weekdays,
+    today: { year: 1, monthId: months[0].id, day: 1 },
+  };
+}
+
+function calendarSettingsSignature(calendar: Omit<CampaignCalendar, "id" | "order">) {
+  return JSON.stringify({
+    name: calendar.name,
+    eraName: calendar.eraName,
+    currentYear: calendar.currentYear,
+    daysPerWeek: calendar.daysPerWeek,
+    daysPerMonth: calendar.daysPerMonth,
+    months: sortMonths(calendar.months).map(({ id, name, season, order }) => ({ id, name, season, order })),
+    weekdays: sortWeekdays(calendar.weekdays).map(({ id, name, order }) => ({ id, name, order })),
+  });
+}
+
+function calendarEventSignature(event: CalendarEvent | undefined, date: CalendarDate) {
+  return JSON.stringify({
+    year: date.year,
+    monthId: date.monthId,
+    day: date.day,
+    title: event?.title || "",
+    notes: event?.notes || "",
+    color: event?.color || "#c51a2a",
+    recursYearly: Boolean(event?.recursYearly),
+  });
+}
+
+function eventMatchesDate(event: CalendarEvent, date: CalendarDate) {
+  if (event.monthId !== date.monthId || event.day !== date.day) return false;
+  return Boolean(event.recursYearly) || event.year === date.year;
+}
+
+function nextDefaultCalendarName(calendars: CampaignCalendar[]) {
+  const existingNames = new Set(calendars.map((calendar) => calendar.name.trim().toLowerCase()));
+  if (!existingNames.has("calendar")) return "Calendar";
+
+  let index = 1;
+  while (existingNames.has(`calendar${index}`)) {
+    index += 1;
+  }
+
+  return `Calendar${index}`;
+}
+
+function sortMonths(months: CalendarMonth[]) {
+  return [...months].sort((a, b) => a.order - b.order);
+}
+
+function sortWeekdays(weekdays: CalendarWeekday[]) {
+  return [...weekdays].sort((a, b) => a.order - b.order);
+}
+
+function titleCase(text: string) {
+  return text.charAt(0).toUpperCase() + text.slice(1);
+}
+
+function nextCalendarDate(calendar: CampaignCalendar, months: CalendarMonth[]) {
+  const sortedMonths = sortMonths(months);
+  const currentMonthIndex = Math.max(
+    0,
+    sortedMonths.findIndex((month) => month.id === calendar.today.monthId),
+  );
+  const currentMonth = sortedMonths[currentMonthIndex] || sortedMonths[0];
+  let nextDay = calendar.today.day + 1;
+  let nextMonth = currentMonth;
+  let nextYear = calendar.today.year;
+
+  if (nextDay > calendar.daysPerMonth) {
+    nextDay = 1;
+    const nextMonthIndex = currentMonthIndex + 1;
+    if (nextMonthIndex >= sortedMonths.length) {
+      nextMonth = sortedMonths[0];
+      nextYear += 1;
+    } else {
+      nextMonth = sortedMonths[nextMonthIndex];
+    }
+  }
+
+  return {
+    year: nextYear,
+    monthId: nextMonth?.id || currentMonth?.id || "",
+    day: nextDay,
+  };
+}
+
+function GlobeIcon() {
+  return <Globe2 className="globe-icon" aria-hidden="true" />;
 }
 
 function MonsterIcon() {

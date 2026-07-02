@@ -46,6 +46,11 @@ service cloud.firestore {
         .hasOnly(['initiative', 'name', 'hp', 'tempHp', 'maxHp', 'ac', 'conditions', 'concentrationPrompt', 'exhaustionLevel', 'updatedAt']);
     }
 
+    function calendarTimeOnly() {
+      return request.resource.data.diff(resource.data).changedKeys()
+        .hasOnly(['today', 'currentYear', 'updatedAt']);
+    }
+
     match /users/{userId} {
       allow read: if signedIn();
       allow create, update: if signedIn()
@@ -98,6 +103,17 @@ service cloud.firestore {
 
       match /statBlocks/{statBlockId} {
         allow read, create, update, delete: if isRoomCreator(roomId);
+      }
+
+      match /calendars/{calendarId} {
+        allow read: if isRoomMember(roomId);
+        allow create, delete: if isRoomCreator(roomId);
+        allow update: if isRoomCreator(roomId)
+          || (isRoomMember(roomId) && calendarTimeOnly());
+
+        match /events/{eventId} {
+          allow read, create, update, delete: if isRoomMember(roomId);
+        }
       }
     }
   }

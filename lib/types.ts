@@ -70,6 +70,50 @@ export type StatBlock = {
   order?: number;
 };
 
+export type Season = "spring" | "summer" | "autumn" | "winter";
+
+export type CalendarMonth = {
+  id: string;
+  name: string;
+  season: Season;
+  order: number;
+};
+
+export type CalendarWeekday = {
+  id: string;
+  name: string;
+  order: number;
+};
+
+export type CalendarDate = {
+  year: number;
+  monthId: string;
+  day: number;
+};
+
+export type CampaignCalendar = {
+  id: string;
+  name: string;
+  eraName: string;
+  currentYear: number;
+  daysPerWeek: number;
+  daysPerMonth: number;
+  months: CalendarMonth[];
+  weekdays: CalendarWeekday[];
+  today: CalendarDate;
+  order?: number;
+};
+
+export type CalendarEvent = CalendarDate & {
+  id: string;
+  title: string;
+  notes: string;
+  color: string;
+  recursYearly?: boolean;
+  ownerUid: string;
+  ownerEmail: string;
+};
+
 export function conditionLabel(condition: Condition) {
   return condition
     .split("-")

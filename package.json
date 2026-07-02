@@ -4,8 +4,8 @@
   "private": true,
   "scripts": {
     "clean": "node scripts/clean-next.mjs",
-    "dev": "next dev",
-    "build": "node scripts/guard-next-build.mjs && next build",
+    "dev": "npm run clean && next dev",
+    "build": "node scripts/guard-next-build.mjs && npm run clean && next build",
     "fresh:dev": "npm run clean && next dev",
     "fresh:build": "node scripts/guard-next-build.mjs && npm run clean && next build",
     "start": "next start",
