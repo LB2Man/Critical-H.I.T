@@ -536,6 +536,23 @@ select:focus {
   font-weight: 700;
 }
 
+.calendar-month-nav {
+  display: grid;
+  grid-template-columns: auto minmax(10rem, 1fr) auto;
+  gap: 0.75rem;
+  align-items: center;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: rgba(16, 11, 11, 0.86);
+  padding: 0.75rem;
+}
+
+.calendar-month-nav strong {
+  color: var(--gold);
+  text-align: center;
+  font-size: 1.15rem;
+}
+
 .calendar-view-toolbar h2,
 .calendar-view-toolbar p {
   margin: 0;
@@ -907,7 +924,7 @@ select:focus {
   background: #130d0d;
   box-shadow: 0 1rem 3rem var(--shadow);
   padding: 1rem;
-  overflow: auto;
+  overflow: hidden;
   scrollbar-color: var(--red) #0c0909;
 }
 
@@ -1086,7 +1103,7 @@ select:focus {
   position: absolute;
   right: 0.25rem;
   bottom: 0.25rem;
-  z-index: 2;
+  z-index: 10;
   width: 1.35rem;
   height: 1.35rem;
   border: 0;

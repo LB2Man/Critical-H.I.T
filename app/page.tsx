@@ -793,7 +793,7 @@ function RoomView({ room, user, onBack }: { room: Room; user: User; onBack: () =
       title,
       ac: 10,
       hp: 10,
-      body: "**Abilities**\nAdd abilities here.",
+      body: "# Main Title\n## Section Title\n**Bold text**\n*Italic text*\n---\n**Abilities**\nAdd abilities here.",
       order,
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
@@ -1842,6 +1842,9 @@ function CalendarView({
   const [eventDraft, setEventDraft] = useState<{ date: CalendarDate; event?: CalendarEvent } | null>(null);
   const months = sortMonths(calendar.months);
   const weekdays = sortWeekdays(calendar.weekdays);
+  const [viewedYear, setViewedYear] = useState(calendar.today.year);
+  const [viewedMonthId, setViewedMonthId] = useState(calendar.today.monthId);
+  const viewedMonth = months.find((month) => month.id === viewedMonthId) || months[0];
 
   useEffect(() => {
     return onSnapshot(collection(db, "rooms", roomId, "calendars", calendar.id, "events"), (snapshot) => {
@@ -1849,22 +1852,51 @@ function CalendarView({
     });
   }, [calendar.id, roomId]);
 
+  useEffect(() => {
+    if (!months.some((month) => month.id === viewedMonthId)) {
+      setViewedMonthId(calendar.today.monthId || months[0]?.id || "");
+    }
+  }, [calendar.today.monthId, months, viewedMonthId]);
+
   function setToday(date: CalendarDate) {
     onUpdate({ today: date, currentYear: date.year });
+    setViewedYear(date.year);
+    setViewedMonthId(date.monthId);
     setContextMenu(null);
   }
 
   function longRest() {
     const nextDate = nextCalendarDate(calendar, months);
     onUpdate({ today: nextDate, currentYear: nextDate.year });
+    setViewedYear(nextDate.year);
+    setViewedMonthId(nextDate.monthId);
   }
 
   function changeYear(delta: number) {
-    const nextYear = calendar.today.year + delta;
-    onUpdate({
-      currentYear: nextYear,
-      today: { ...calendar.today, year: nextYear },
-    });
+    setViewedYear((year) => year + delta);
+  }
+
+  function changeMonth(delta: number) {
+    if (!months.length) return;
+    const currentIndex = Math.max(
+      0,
+      months.findIndex((month) => month.id === viewedMonth?.id),
+    );
+    const nextIndex = currentIndex + delta;
+
+    if (nextIndex < 0) {
+      setViewedMonthId(months[months.length - 1].id);
+      setViewedYear((year) => year - 1);
+      return;
+    }
+
+    if (nextIndex >= months.length) {
+      setViewedMonthId(months[0].id);
+      setViewedYear((year) => year + 1);
+      return;
+    }
+
+    setViewedMonthId(months[nextIndex].id);
   }
 
   return (
@@ -1877,7 +1909,7 @@ function CalendarView({
         <div>
           <h2>{calendar.name}</h2>
           <p>
-            {calendar.today.year} {calendar.eraName}
+            {viewedYear} {calendar.eraName}
           </p>
         </div>
         <div className="calendar-year-controls">
@@ -1906,12 +1938,24 @@ function CalendarView({
         )}
       </div>
 
+      <div className="calendar-month-nav">
+        <button className="tool-button" onClick={() => changeMonth(-1)}>
+          <ChevronLeft aria-hidden="true" />
+          Last Month
+        </button>
+        <strong>{viewedMonth?.name || "Month"}</strong>
+        <button className="tool-button" onClick={() => changeMonth(1)}>
+          Next Month
+          <ChevronRight aria-hidden="true" />
+        </button>
+      </div>
+
       <div className="calendar-months">
-        {months.map((month) => (
-          <section className={`calendar-month season-${month.season}`} key={month.id}>
+        {viewedMonth && (
+          <section className={`calendar-month season-${viewedMonth.season}`} key={viewedMonth.id}>
             <div className="calendar-month-header">
-              <h3>{month.name}</h3>
-              <span>{titleCase(month.season)}</span>
+              <h3>{viewedMonth.name}</h3>
+              <span>{titleCase(viewedMonth.season)}</span>
             </div>
             <div
               className="calendar-weekday-row"
@@ -1927,17 +1971,17 @@ function CalendarView({
             >
               {Array.from({ length: Math.max(1, calendar.daysPerMonth) }, (_, index) => {
                 const day = index + 1;
-                const date = { year: calendar.today.year, monthId: month.id, day };
+                const date = { year: viewedYear, monthId: viewedMonth.id, day };
                 const dayEvents = events.filter((event) => eventMatchesDate(event, date));
                 const isToday =
                   calendar.today.year === date.year &&
-                  calendar.today.monthId === month.id &&
+                  calendar.today.monthId === viewedMonth.id &&
                   calendar.today.day === day;
 
                 return (
                   <button
                     className={`calendar-day${isToday ? " today" : ""}`}
-                    key={`${month.id}-${day}`}
+                    key={`${viewedMonth.id}-${day}`}
                     type="button"
                     onContextMenu={(event) => {
                       event.preventDefault();
@@ -1966,7 +2010,7 @@ function CalendarView({
               })}
             </div>
           </section>
-        ))}
+        )}
       </div>
 
       {contextMenu && (
@@ -2813,6 +2857,7 @@ function CombatantRow({
   const [conditionRounds, setConditionRounds] = useState("");
   const [hpActionAmount, setHpActionAmount] = useState("");
   const [nameFocused, setNameFocused] = useState(false);
+  const [localName, setLocalName] = useState(combatant.name);
   const [previewStatBlock, setPreviewStatBlock] = useState<StatBlock | null>(null);
   const [editingPreviewStatBlock, setEditingPreviewStatBlock] = useState(false);
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
@@ -2833,18 +2878,25 @@ function CombatantRow({
   const conditionSuggestions = CONDITIONS.filter((condition) =>
     conditionLabel(condition).toLowerCase().includes(conditionInput.trim().toLowerCase()),
   );
+  const visibleName = nameFocused ? localName : combatant.name;
   const matchedStatBlock = statBlocks.find(
-    (statBlock) => normalizeStatBlockTitle(statBlock.title) === normalizeStatBlockTitle(combatant.name),
+    (statBlock) => normalizeStatBlockTitle(statBlock.title) === normalizeStatBlockTitle(visibleName),
   );
   const currentPreviewStatBlock = previewStatBlock
     ? statBlocks.find((statBlock) => statBlock.id === previewStatBlock.id) || previewStatBlock
     : null;
   const statBlockNameSuggestions =
-    nameFocused && combatant.name.trim()
+    nameFocused && visibleName.trim()
       ? statBlocks
-          .filter((statBlock) => statBlock.title.toLowerCase().includes(combatant.name.trim().toLowerCase()))
+          .filter((statBlock) => statBlock.title.toLowerCase().includes(visibleName.trim().toLowerCase()))
           .slice(0, 6)
       : [];
+
+  useEffect(() => {
+    if (!nameFocused) {
+      setLocalName(combatant.name);
+    }
+  }, [combatant.id, combatant.name, nameFocused]);
 
   function addCondition(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -2956,12 +3008,18 @@ function CombatantRow({
           <div className="name-input-row">
             <input
               className="name-input"
-              value={combatant.name}
+              value={visibleName}
               placeholder="Name"
               disabled={!canManage}
-              onFocus={() => setNameFocused(true)}
+              onFocus={() => {
+                setLocalName(combatant.name);
+                setNameFocused(true);
+              }}
               onBlur={() => window.setTimeout(() => setNameFocused(false), 120)}
-              onChange={(event) => onUpdate({ name: event.target.value })}
+              onChange={(event) => {
+                setLocalName(event.target.value);
+                onUpdate({ name: event.target.value });
+              }}
               aria-label="Combatant name"
             />
             {matchedStatBlock && (
@@ -2987,6 +3045,7 @@ function CombatantRow({
                   type="button"
                   onMouseDown={(event) => event.preventDefault()}
                   onClick={() => {
+                    setLocalName(statBlock.title);
                     onUpdate({
                       name: statBlock.title,
                       ac: statBlock.ac ?? 10,
