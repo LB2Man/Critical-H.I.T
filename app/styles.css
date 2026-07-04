@@ -282,6 +282,10 @@ select:focus {
 }
 
 .campaign-card-top .icon-button {
+  margin-left: 0;
+}
+
+.campaign-card-top .icon-button:first-of-type {
   margin-left: auto;
 }
 
@@ -326,6 +330,20 @@ select:focus {
 .room-card span {
   font-size: 1.3rem;
   font-weight: 700;
+}
+
+.campaign-rename {
+  display: grid;
+  gap: 0.45rem;
+}
+
+.campaign-rename input {
+  width: 100%;
+}
+
+.campaign-rename-actions {
+  display: flex;
+  gap: 0.45rem;
 }
 
 .room-card small,
@@ -982,6 +1000,10 @@ select:focus {
   margin: -0.35rem 0 0;
   color: #ff8b93;
   font-size: 0.9rem;
+}
+
+.create-room-error {
+  flex-basis: 100%;
 }
 
 .stat-block-editor {

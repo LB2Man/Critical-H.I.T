@@ -41,10 +41,12 @@ import { onAuthStateChanged, signInWithPopup, signOut, User } from "firebase/aut
 import {
   ChevronRight,
   ChevronLeft,
+  Check,
   GripVertical,
   HeartPulse,
   LogOut,
   Moon,
+  Pencil,
   Plus,
   RotateCcw,
   Settings,
@@ -54,6 +56,7 @@ import {
   Sword,
   Trash2,
   Globe2,
+  X,
 } from "lucide-react";
 import { auth, db, firebaseReady, googleProvider } from "../lib/firebase";
 import {
@@ -78,6 +81,10 @@ import {
 
 type View = "rooms" | "room";
 type RoomTab = "initiative" | "invite" | "statBlocks" | "calendar";
+
+function normalizeCampaignName(name: string) {
+  return name.trim().replace(/\s+/g, " ").toLocaleLowerCase();
+}
 
 export default function Home() {
   const [user, setUser] = useState<User | null>(null);
@@ -218,6 +225,7 @@ export default function Home() {
 
     const name = String(formData.get("roomName") || "").trim();
     if (!name) return;
+    if (rooms.some((room) => normalizeCampaignName(room.name) === normalizeCampaignName(name))) return;
 
     const roomRef = await addDoc(collection(db, "rooms"), {
       name,
@@ -259,6 +267,24 @@ export default function Home() {
       },
       { merge: true },
     );
+  }
+
+  async function renameCampaign(roomId: string, name: string) {
+    if (!user) return;
+    const nextName = name.trim();
+    if (!nextName) return;
+    if (
+      rooms.some(
+        (room) => room.id !== roomId && normalizeCampaignName(room.name) === normalizeCampaignName(nextName),
+      )
+    ) {
+      return;
+    }
+
+    await updateDoc(doc(db, "rooms", roomId), {
+      name: nextName,
+      updatedAt: serverTimestamp(),
+    });
   }
 
   async function deleteCampaign(roomId: string) {
@@ -371,6 +397,7 @@ export default function Home() {
           onDeclineInvite={declineCampaignInvite}
           onLeaveCampaign={leaveCampaign}
           onReorderCampaigns={reorderCampaigns}
+          onRenameCampaign={renameCampaign}
           onDeleteCampaign={deleteCampaign}
         />
       ) : activeRoom ? (
@@ -388,6 +415,7 @@ export default function Home() {
           onDeclineInvite={declineCampaignInvite}
           onLeaveCampaign={leaveCampaign}
           onReorderCampaigns={reorderCampaigns}
+          onRenameCampaign={renameCampaign}
           onDeleteCampaign={deleteCampaign}
         />
       )}
@@ -441,22 +469,25 @@ function RoomsView({
   onDeclineInvite,
   onLeaveCampaign,
   onReorderCampaigns,
+  onRenameCampaign,
   onDeleteCampaign,
 }: {
   rooms: Room[];
   user: User;
-  onCreateRoom: (formData: FormData) => void;
+  onCreateRoom: (formData: FormData) => void | Promise<void>;
   onOpenRoom: (roomId: string) => void;
   onAcceptInvite: (roomId: string) => void;
   onDeclineInvite: (roomId: string) => void;
   onLeaveCampaign: (roomId: string) => void;
   onReorderCampaigns: (roomIds: string[]) => void;
+  onRenameCampaign: (roomId: string, name: string) => void | Promise<void>;
   onDeleteCampaign: (roomId: string) => void;
 }) {
   const [campaignAction, setCampaignAction] = useState<{
     room: Room;
     type: "delete" | "leave";
   } | null>(null);
+  const [campaignNameError, setCampaignNameError] = useState("");
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
@@ -479,12 +510,41 @@ function RoomsView({
         <h1>Choose a Campaign</h1>
       </div>
 
-      <form className="create-room" action={onCreateRoom}>
-        <input name="roomName" placeholder="Campaign name" aria-label="Campaign name" />
+      <form
+        className="create-room"
+        onSubmit={(event) => {
+          event.preventDefault();
+          const formData = new FormData(event.currentTarget);
+          const campaignName = String(formData.get("roomName") || "").trim();
+
+          if (!campaignName) {
+            setCampaignNameError("You can't create a campaign without a name.");
+            return;
+          }
+
+          if (rooms.some((room) => normalizeCampaignName(room.name) === normalizeCampaignName(campaignName))) {
+            setCampaignNameError("A campaign with this name already exists.");
+            return;
+          }
+
+          setCampaignNameError("");
+          onCreateRoom(formData);
+          event.currentTarget.reset();
+        }}
+      >
+        <input
+          name="roomName"
+          placeholder="Campaign name"
+          aria-label="Campaign name"
+          onChange={() => {
+            if (campaignNameError) setCampaignNameError("");
+          }}
+        />
         <button className="primary-action" type="submit">
           <Plus aria-hidden="true" />
           Create Campaign
         </button>
+        {campaignNameError && <p className="field-error create-room-error">{campaignNameError}</p>}
       </form>
 
       <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleCampaignDragEnd}>
@@ -498,6 +558,14 @@ function RoomsView({
                 onOpenRoom={onOpenRoom}
                 onAcceptInvite={onAcceptInvite}
                 onDeclineInvite={onDeclineInvite}
+                onRenameCampaign={onRenameCampaign}
+                isCampaignNameTaken={(name) =>
+                  rooms.some(
+                    (otherRoom) =>
+                      otherRoom.id !== room.id
+                      && normalizeCampaignName(otherRoom.name) === normalizeCampaignName(name),
+                  )
+                }
                 onRequestAction={setCampaignAction}
               />
             ))}
@@ -550,6 +618,8 @@ function CampaignCard({
   onOpenRoom,
   onAcceptInvite,
   onDeclineInvite,
+  onRenameCampaign,
+  isCampaignNameTaken,
   onRequestAction,
 }: {
   room: Room;
@@ -557,8 +627,13 @@ function CampaignCard({
   onOpenRoom: (roomId: string) => void;
   onAcceptInvite: (roomId: string) => void;
   onDeclineInvite: (roomId: string) => void;
+  onRenameCampaign: (roomId: string, name: string) => void | Promise<void>;
+  isCampaignNameTaken: (name: string) => boolean;
   onRequestAction: (action: { room: Room; type: "delete" | "leave" }) => void;
 }) {
+  const [isRenaming, setIsRenaming] = useState(false);
+  const [draftName, setDraftName] = useState(room.name);
+  const [renameError, setRenameError] = useState("");
   const isPending = Boolean(user.email && room.pendingInvitedEmails?.includes(user.email));
   const isCreator = room.creatorUid === user.uid;
   const isAcceptedInvitee = Boolean(user.email && room.invitedEmails.includes(user.email) && !isCreator);
@@ -566,6 +641,10 @@ function CampaignCard({
     id: room.id,
   });
   const canOpen = !isPending;
+  useEffect(() => {
+    if (!isRenaming) setDraftName(room.name);
+  }, [isRenaming, room.name]);
+
   const handleTrashClick = (event: React.MouseEvent<HTMLButtonElement>) => {
     event.stopPropagation();
     if (isCreator) {
@@ -576,6 +655,36 @@ function CampaignCard({
   };
   const stopCardGesture = (event: React.SyntheticEvent) => {
     event.stopPropagation();
+  };
+  const startRename = (event: React.MouseEvent<HTMLButtonElement>) => {
+    event.stopPropagation();
+    setDraftName(room.name);
+    setRenameError("");
+    setIsRenaming(true);
+  };
+  const cancelRename = (event?: React.SyntheticEvent) => {
+    event?.stopPropagation();
+    setDraftName(room.name);
+    setRenameError("");
+    setIsRenaming(false);
+  };
+  const saveRename = async (event?: React.SyntheticEvent) => {
+    event?.stopPropagation();
+    const nextName = draftName.trim();
+
+    if (!nextName) {
+      setRenameError("You can't create a campaign without a name.");
+      return;
+    }
+
+    if (isCampaignNameTaken(nextName)) {
+      setRenameError("A campaign with this name already exists.");
+      return;
+    }
+
+    await onRenameCampaign(room.id, nextName);
+    setRenameError("");
+    setIsRenaming(false);
   };
 
   return (
@@ -600,6 +709,17 @@ function CampaignCard({
     >
       <div className="campaign-card-top">
         <D20Icon />
+        {isCreator && !isRenaming && (
+          <button
+            className="icon-button"
+            title="Rename campaign"
+            onPointerDown={stopCardGesture}
+            onKeyDown={stopCardGesture}
+            onClick={startRename}
+          >
+            <Pencil aria-hidden="true" />
+          </button>
+        )}
         {(isCreator || isAcceptedInvitee) && (
           <button
             className="icon-button danger"
@@ -612,7 +732,36 @@ function CampaignCard({
           </button>
         )}
       </div>
-      <span>{room.name}</span>
+      {isRenaming ? (
+        <div className="campaign-rename" onPointerDown={stopCardGesture} onKeyDown={stopCardGesture}>
+          <input
+            value={draftName}
+            onChange={(event) => {
+              setDraftName(event.target.value);
+              if (renameError) setRenameError("");
+            }}
+            onClick={stopCardGesture}
+            onKeyDown={(event) => {
+              event.stopPropagation();
+              if (event.key === "Enter") saveRename(event);
+              if (event.key === "Escape") cancelRename(event);
+            }}
+            aria-label="Campaign name"
+            autoFocus
+          />
+          <div className="campaign-rename-actions">
+            <button className="icon-button" title="Save campaign name" onClick={saveRename}>
+              <Check aria-hidden="true" />
+            </button>
+            <button className="icon-button danger" title="Cancel rename" onClick={cancelRename}>
+              <X aria-hidden="true" />
+            </button>
+          </div>
+          {renameError && <p className="field-error">{renameError}</p>}
+        </div>
+      ) : (
+        <span>{room.name}</span>
+      )}
       <small>{isCreator ? "Creator" : isPending ? "Pending invite" : "Invited"}</small>
       {isPending ? (
         <div className="campaign-invite-actions">
@@ -870,7 +1019,6 @@ function RoomView({ room, user, onBack }: { room: Room; user: User; onBack: () =
   }
 
   async function sortByInitiative() {
-    if (!isCreator) return;
     const sorted = [...combatants].sort((a, b) => b.initiative - a.initiative);
     const batch = writeBatch(db);
 
@@ -881,10 +1029,12 @@ function RoomView({ room, user, onBack }: { room: Room; user: User; onBack: () =
       });
     });
 
-    batch.update(doc(db, "rooms", room.id), {
-      activeCombatantId: sorted[0]?.id || "",
-      updatedAt: serverTimestamp(),
-    });
+    if (isCreator) {
+      batch.update(doc(db, "rooms", room.id), {
+        activeCombatantId: sorted[0]?.id || "",
+        updatedAt: serverTimestamp(),
+      });
+    }
     await batch.commit();
   }
 
@@ -1191,7 +1341,7 @@ function RoomView({ room, user, onBack }: { room: Room; user: User; onBack: () =
               <ChevronRight aria-hidden="true" />
               Next
             </button>
-            <button className="tool-button" onClick={sortByInitiative} disabled={!isCreator}>
+            <button className="tool-button" onClick={sortByInitiative}>
               <SortDesc aria-hidden="true" />
               Sort
             </button>
@@ -1865,6 +2015,12 @@ function CalendarView({
     setContextMenu(null);
   }
 
+  function returnToCurrentDay() {
+    setViewedYear(calendar.today.year);
+    setViewedMonthId(calendar.today.monthId);
+    setContextMenu(null);
+  }
+
   function longRest() {
     const nextDate = nextCalendarDate(calendar, months);
     onUpdate({ today: nextDate, currentYear: nextDate.year });
@@ -1926,6 +2082,9 @@ function CalendarView({
             +10
           </button>
         </div>
+        <button className="tool-button" onClick={returnToCurrentDay}>
+          Return to Current Day
+        </button>
         <button className="primary-action" onClick={longRest}>
           <Moon aria-hidden="true" />
           Long Rest
@@ -3341,3 +3500,5 @@ function ReadOnlyStatBlockModal({
     </div>
   );
 }
+
+

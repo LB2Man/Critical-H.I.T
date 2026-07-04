@@ -46,6 +46,11 @@ service cloud.firestore {
         .hasOnly(['initiative', 'name', 'hp', 'tempHp', 'maxHp', 'ac', 'conditions', 'concentrationPrompt', 'exhaustionLevel', 'updatedAt']);
     }
 
+
+    function combatantSortOnly() {
+      return request.resource.data.diff(resource.data).changedKeys()
+        .hasOnly(['order', 'updatedAt']);
+    }
     function calendarTimeOnly() {
       return request.resource.data.diff(resource.data).changedKeys()
         .hasOnly(['today', 'currentYear', 'updatedAt']);
@@ -86,6 +91,7 @@ service cloud.firestore {
             && request.resource.data.type == 'player'
           );
         allow update: if isRoomCreator(roomId)
+          || (isRoomMember(roomId) && combatantSortOnly())
           || (
             isRoomMember(roomId)
             && resource.data.ownerUid == request.auth.uid
@@ -118,3 +124,4 @@ service cloud.firestore {
     }
   }
 }
+
