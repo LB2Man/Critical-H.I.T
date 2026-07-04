@@ -56,6 +56,14 @@ service cloud.firestore {
         .hasOnly(['today', 'currentYear', 'updatedAt']);
     }
 
+    function savedCharacterDataBelongsToUser() {
+      return request.resource.data.ownerUid == request.auth.uid
+        && request.resource.data.ownerEmail == userEmail()
+        && request.resource.data.name is string
+        && request.resource.data.hp is number
+        && request.resource.data.ac is number;
+    }
+
     match /users/{userId} {
       allow read: if signedIn();
       allow create, update: if signedIn()
@@ -109,6 +117,18 @@ service cloud.firestore {
 
       match /statBlocks/{statBlockId} {
         allow read, create, update, delete: if isRoomCreator(roomId);
+      }
+
+      match /savedCharacters/{savedCharacterId} {
+        allow read: if isRoomMember(roomId)
+          && resource.data.ownerUid == request.auth.uid;
+        allow create: if isRoomMember(roomId)
+          && savedCharacterDataBelongsToUser();
+        allow update: if isRoomMember(roomId)
+          && resource.data.ownerUid == request.auth.uid
+          && savedCharacterDataBelongsToUser();
+        allow delete: if isRoomMember(roomId)
+          && resource.data.ownerUid == request.auth.uid;
       }
 
       match /calendars/{calendarId} {

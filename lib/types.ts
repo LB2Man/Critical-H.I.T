@@ -61,6 +61,15 @@ export type Combatant = {
   order: number;
 };
 
+export type SavedCharacter = {
+  id: string;
+  name: string;
+  hp: number;
+  ac: number;
+  ownerUid: string;
+  ownerEmail: string;
+};
+
 export type StatBlock = {
   id: string;
   title: string;

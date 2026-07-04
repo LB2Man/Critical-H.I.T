@@ -57,6 +57,7 @@ import {
   Trash2,
   Globe2,
   X,
+  UserPlus,
 } from "lucide-react";
 import { auth, db, firebaseReady, googleProvider } from "../lib/firebase";
 import {
@@ -70,6 +71,7 @@ import {
   CampaignCalendar,
   HpVisibility,
   Room,
+  SavedCharacter,
   Season,
   StatBlock,
   CONDITIONS,
@@ -83,6 +85,10 @@ type View = "rooms" | "room";
 type RoomTab = "initiative" | "invite" | "statBlocks" | "calendar";
 
 function normalizeCampaignName(name: string) {
+  return name.trim().replace(/\s+/g, " ").toLocaleLowerCase();
+}
+
+function normalizeSavedCharacterName(name: string) {
   return name.trim().replace(/\s+/g, " ").toLocaleLowerCase();
 }
 
@@ -292,10 +298,12 @@ export default function Home() {
 
     const combatants = await getDocs(collection(db, "rooms", roomId, "combatants"));
     const statBlocks = await getDocs(collection(db, "rooms", roomId, "statBlocks"));
+    const savedCharacters = await getDocs(collection(db, "rooms", roomId, "savedCharacters"));
     const calendars = await getDocs(collection(db, "rooms", roomId, "calendars"));
     const batch = writeBatch(db);
     combatants.docs.forEach((combatant) => batch.delete(combatant.ref));
     statBlocks.docs.forEach((statBlock) => batch.delete(statBlock.ref));
+    savedCharacters.docs.forEach((savedCharacter) => batch.delete(savedCharacter.ref));
     for (const calendar of calendars.docs) {
       const events = await getDocs(collection(db, "rooms", roomId, "calendars", calendar.id, "events"));
       events.docs.forEach((event) => batch.delete(event.ref));
@@ -819,8 +827,10 @@ function RoomView({ room, user, onBack }: { room: Room; user: User; onBack: () =
   const [combatants, setCombatants] = useState<Combatant[]>([]);
   const [statBlocks, setStatBlocks] = useState<StatBlock[]>([]);
   const [calendars, setCalendars] = useState<CampaignCalendar[]>([]);
+  const [savedCharacters, setSavedCharacters] = useState<SavedCharacter[]>([]);
   const [inviteEmail, setInviteEmail] = useState("");
   const [activeTab, setActiveTab] = useState<RoomTab>("initiative");
+  const [savedCharactersOpen, setSavedCharactersOpen] = useState(false);
   const [activeStatBlockId, setActiveStatBlockId] = useState<string | null>(null);
   const [deleteStatBlockId, setDeleteStatBlockId] = useState<string | null>(null);
   const [activeCalendarId, setActiveCalendarId] = useState<string | null>(null);
@@ -882,6 +892,26 @@ function RoomView({ room, user, onBack }: { room: Room; user: User; onBack: () =
     });
   }, [room.id]);
 
+  useEffect(() => {
+    if (isCreator) {
+      setSavedCharacters([]);
+      return;
+    }
+
+    const savedCharactersQuery = query(
+      collection(db, "rooms", room.id, "savedCharacters"),
+      where("ownerUid", "==", user.uid),
+    );
+
+    return onSnapshot(savedCharactersQuery, (snapshot) => {
+      setSavedCharacters(
+        snapshot.docs
+          .map((item) => ({ id: item.id, ...item.data() }) as SavedCharacter)
+          .sort((a, b) => a.name.localeCompare(b.name)),
+      );
+    });
+  }, [isCreator, room.id, user.uid]);
+
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
@@ -920,6 +950,62 @@ function RoomView({ room, user, onBack }: { room: Room; user: User; onBack: () =
       ownerUid: isPlayer ? user.uid : "",
       ownerEmail: isPlayer ? user.email : "",
       type: isPlayer ? "player" : "npc",
+      order,
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    });
+
+    if (!room.activeCombatantId && combatants.length === 0) {
+      await updateDoc(doc(db, "rooms", room.id), {
+        activeCombatantId: newRef.id,
+        updatedAt: serverTimestamp(),
+      });
+    }
+  }
+
+  async function addSavedCharacter(character: Omit<SavedCharacter, "id" | "ownerUid" | "ownerEmail">) {
+    if (!user.email || isCreator) return;
+
+    await addDoc(collection(db, "rooms", room.id, "savedCharacters"), {
+      ...character,
+      ownerUid: user.uid,
+      ownerEmail: user.email,
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    });
+  }
+
+  async function updateSavedCharacter(id: string, patch: Partial<SavedCharacter>) {
+    if (isCreator) return;
+    await updateDoc(doc(db, "rooms", room.id, "savedCharacters", id), {
+      ...patch,
+      updatedAt: serverTimestamp(),
+    });
+  }
+
+  async function removeSavedCharacter(id: string) {
+    if (isCreator) return;
+    await deleteDoc(doc(db, "rooms", room.id, "savedCharacters", id));
+  }
+
+  async function addSavedCharacterToInitiative(character: SavedCharacter) {
+    if (!user.email || isCreator) return;
+    const order = combatants.length ? Math.max(...combatants.map((item) => item.order)) + 1 : 0;
+    const hp = Math.max(0, Number(character.hp) || 0);
+    const ac = Math.max(0, Number(character.ac) || 0);
+
+    const newRef = await addDoc(collection(db, "rooms", room.id, "combatants"), {
+      initiative: 0,
+      name: character.name,
+      conditions: [],
+      hp,
+      tempHp: 0,
+      maxHp: hp,
+      ac,
+      exhaustionLevel: 0,
+      ownerUid: user.uid,
+      ownerEmail: user.email,
+      type: "player",
       order,
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
@@ -1349,6 +1435,12 @@ function RoomView({ room, user, onBack }: { room: Room; user: User; onBack: () =
               <Plus aria-hidden="true" />
               Add
             </button>
+            {!isCreator && (
+              <button className="tool-button" onClick={() => setSavedCharactersOpen(true)}>
+                <UserPlus aria-hidden="true" />
+                Saved Characters
+              </button>
+            )}
             {isCreator && (
               <>
                 <button className="toggle-button" onClick={() => toggleVisibility("hideHpFromInvitees")}>
@@ -1400,9 +1492,161 @@ function RoomView({ room, user, onBack }: { room: Room; user: User; onBack: () =
               </SortableContext>
             </DndContext>
           </div>
+
+          {savedCharactersOpen && !isCreator && (
+            <SavedCharactersModal
+              characters={savedCharacters}
+              onClose={() => setSavedCharactersOpen(false)}
+              onCreate={addSavedCharacter}
+              onUpdate={updateSavedCharacter}
+              onDelete={removeSavedCharacter}
+              onAddToInitiative={addSavedCharacterToInitiative}
+            />
+          )}
         </div>
       )}
     </section>
+  );
+}
+
+function SavedCharactersModal({
+  characters,
+  onClose,
+  onCreate,
+  onUpdate,
+  onDelete,
+  onAddToInitiative,
+}: {
+  characters: SavedCharacter[];
+  onClose: () => void;
+  onCreate: (character: Omit<SavedCharacter, "id" | "ownerUid" | "ownerEmail">) => void | Promise<void>;
+  onUpdate: (id: string, patch: Partial<SavedCharacter>) => void | Promise<void>;
+  onDelete: (id: string) => void | Promise<void>;
+  onAddToInitiative: (character: SavedCharacter) => void | Promise<void>;
+}) {
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [name, setName] = useState("");
+  const [hp, setHp] = useState("10");
+  const [ac, setAc] = useState("10");
+  const [error, setError] = useState("");
+  const sortedCharacters = [...characters].sort((a, b) => a.name.localeCompare(b.name));
+
+  function resetForm() {
+    setEditingId(null);
+    setName("");
+    setHp("10");
+    setAc("10");
+    setError("");
+  }
+
+  function beginEdit(character: SavedCharacter) {
+    setEditingId(character.id);
+    setName(character.name);
+    setHp(String(character.hp));
+    setAc(String(character.ac));
+    setError("");
+  }
+
+  async function saveCharacter(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const nextName = name.trim();
+    const nextHp = Math.max(0, Number(hp) || 0);
+    const nextAc = Math.max(0, Number(ac) || 0);
+
+    if (!nextName) {
+      setError("Character name is required.");
+      return;
+    }
+
+    if (
+      characters.some(
+        (character) =>
+          character.id !== editingId &&
+          normalizeSavedCharacterName(character.name) === normalizeSavedCharacterName(nextName),
+      )
+    ) {
+      setError("A saved character with this name already exists.");
+      return;
+    }
+
+    if (editingId) {
+      await onUpdate(editingId, { name: nextName, hp: nextHp, ac: nextAc });
+    } else {
+      await onCreate({ name: nextName, hp: nextHp, ac: nextAc });
+    }
+
+    resetForm();
+  }
+
+  return (
+    <div className="modal-backdrop" role="presentation" onClick={onClose}>
+      <div className="saved-characters-modal" role="dialog" aria-modal="true" onClick={(event) => event.stopPropagation()}>
+        <div className="modal-title-row">
+          <h2>Saved Characters</h2>
+          <button className="subtle-button" onClick={onClose}>
+            Close
+          </button>
+        </div>
+
+        <form className="saved-character-form" onSubmit={saveCharacter}>
+          <label className="field-stack">
+            <span>Name</span>
+            <input
+              value={name}
+              onChange={(event) => {
+                setName(event.target.value);
+                if (error) setError("");
+              }}
+              placeholder="Name"
+            />
+          </label>
+          <label className="field-stack">
+            <span>HP</span>
+            <input type="number" min="0" value={hp} onChange={(event) => setHp(event.target.value)} />
+          </label>
+          <label className="field-stack">
+            <span>AC</span>
+            <input type="number" min="0" value={ac} onChange={(event) => setAc(event.target.value)} />
+          </label>
+          <button className="tool-button" type="submit">
+            {editingId ? "Save" : "Save Character"}
+          </button>
+          {editingId && (
+            <button className="subtle-button" type="button" onClick={resetForm}>
+              Cancel
+            </button>
+          )}
+          {error && <p className="field-error saved-character-error">{error}</p>}
+        </form>
+
+        <div className="saved-character-list">
+          {sortedCharacters.length ? (
+            sortedCharacters.map((character) => (
+              <div className="saved-character-row" key={character.id}>
+                <div>
+                  <strong>{character.name}</strong>
+                  <span>
+                    HP {character.hp} | AC {character.ac}
+                  </span>
+                </div>
+                <button className="tool-button" onClick={() => onAddToInitiative(character)}>
+                  <Plus aria-hidden="true" />
+                  Add to Initiative
+                </button>
+                <button className="tool-button" onClick={() => beginEdit(character)}>
+                  Edit
+                </button>
+                <button className="icon-button danger" onClick={() => onDelete(character.id)} title="Delete saved character">
+                  <Trash2 aria-hidden="true" />
+                </button>
+              </div>
+            ))
+          ) : (
+            <div className="empty-state">No saved characters yet.</div>
+          )}
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -1988,6 +2232,7 @@ function CalendarView({
 }) {
   const [events, setEvents] = useState<CalendarEvent[]>([]);
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; date: CalendarDate } | null>(null);
+  const contextMenuRef = useRef<HTMLDivElement | null>(null);
   const [activeDay, setActiveDay] = useState<CalendarDate | null>(null);
   const [eventDraft, setEventDraft] = useState<{ date: CalendarDate; event?: CalendarEvent } | null>(null);
   const months = sortMonths(calendar.months);
@@ -2007,6 +2252,27 @@ function CalendarView({
       setViewedMonthId(calendar.today.monthId || months[0]?.id || "");
     }
   }, [calendar.today.monthId, months, viewedMonthId]);
+
+  useEffect(() => {
+    if (!contextMenu) return;
+
+    function closeContextMenu(event: PointerEvent) {
+      if (contextMenuRef.current?.contains(event.target as Node)) return;
+      setContextMenu(null);
+    }
+
+    function closeContextMenuWithKeyboard(event: KeyboardEvent) {
+      if (event.key === "Escape") setContextMenu(null);
+    }
+
+    document.addEventListener("pointerdown", closeContextMenu);
+    document.addEventListener("keydown", closeContextMenuWithKeyboard);
+
+    return () => {
+      document.removeEventListener("pointerdown", closeContextMenu);
+      document.removeEventListener("keydown", closeContextMenuWithKeyboard);
+    };
+  }, [contextMenu]);
 
   function setToday(date: CalendarDate) {
     onUpdate({ today: date, currentYear: date.year });
@@ -2173,8 +2439,15 @@ function CalendarView({
       </div>
 
       {contextMenu && (
-        <div className="calendar-context-menu" style={{ left: contextMenu.x, top: contextMenu.y }}>
-          <button onClick={() => setEventDraft({ date: contextMenu.date })}>Add Event</button>
+        <div ref={contextMenuRef} className="calendar-context-menu" style={{ left: contextMenu.x, top: contextMenu.y }}>
+          <button
+            onClick={() => {
+              setEventDraft({ date: contextMenu.date });
+              setContextMenu(null);
+            }}
+          >
+            Add Event
+          </button>
           <button onClick={() => setToday(contextMenu.date)}>Set as Today</button>
         </div>
       )}
