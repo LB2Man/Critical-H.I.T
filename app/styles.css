@@ -1103,7 +1103,7 @@ select:focus {
 
 .stat-block-preview-only {
   min-height: 28rem;
-  max-height: none;
+  max-height: min(34rem, calc(100vh - 12rem));
 }
 
 .stat-block-rendered {

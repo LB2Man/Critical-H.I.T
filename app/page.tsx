@@ -1529,6 +1529,7 @@ function SavedCharactersModal({
   const [hp, setHp] = useState("10");
   const [ac, setAc] = useState("10");
   const [error, setError] = useState("");
+  const [deleteCharacter, setDeleteCharacter] = useState<SavedCharacter | null>(null);
   const sortedCharacters = [...characters].sort((a, b) => a.name.localeCompare(b.name));
 
   function resetForm() {
@@ -1636,7 +1637,11 @@ function SavedCharactersModal({
                 <button className="tool-button" onClick={() => beginEdit(character)}>
                   Edit
                 </button>
-                <button className="icon-button danger" onClick={() => onDelete(character.id)} title="Delete saved character">
+                <button
+                  className="icon-button danger"
+                  onClick={() => setDeleteCharacter(character)}
+                  title="Delete saved character"
+                >
                   <Trash2 aria-hidden="true" />
                 </button>
               </div>
@@ -1645,6 +1650,30 @@ function SavedCharactersModal({
             <div className="empty-state">No saved characters yet.</div>
           )}
         </div>
+
+        {deleteCharacter && (
+          <div className="modal-backdrop nested-modal" role="presentation" onClick={() => setDeleteCharacter(null)}>
+            <div className="confirm-modal" role="dialog" aria-modal="true" onClick={(event) => event.stopPropagation()}>
+              <h2>Delete saved character?</h2>
+              <p>This will remove {deleteCharacter.name} from your saved characters.</p>
+              <div className="confirm-actions">
+                <button className="subtle-button" onClick={() => setDeleteCharacter(null)}>
+                  Cancel
+                </button>
+                <button
+                  className="tool-button danger"
+                  onClick={async () => {
+                    if (editingId === deleteCharacter.id) resetForm();
+                    await onDelete(deleteCharacter.id);
+                    setDeleteCharacter(null);
+                  }}
+                >
+                  Delete
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
