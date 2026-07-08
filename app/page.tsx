@@ -1028,7 +1028,8 @@ function RoomView({ room, user, onBack }: { room: Room; user: User; onBack: () =
       title,
       ac: 10,
       hp: 10,
-      body: "# Main Title\n## Section Title\n**Bold text**\n*Italic text*\n---\n**Abilities**\nAdd abilities here.",
+      body:
+        "# Main Title\n## Section Title\n**Bold text**\n*Italic text with stars*\n_Italic text with underscores_\n==Yellow marker text==\n==**Highlighted bold text**==\n==_Highlighted italic text_==\n---\n**Abilities**\nAdd abilities here.",
       order,
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
@@ -3258,7 +3259,7 @@ function RenderedStatBlock({ text }: { text: string }) {
 
 function renderInlineStatText(text: string) {
   const parts: React.ReactNode[] = [];
-  const pattern = /(\*\*.+?\*\*|\*.+?\*)/g;
+  const pattern = /(==.+?==|\*\*.+?\*\*|\*[^*]+?\*|_[^_]+?_)/g;
   let lastIndex = 0;
   let match: RegExpExecArray | null;
 
@@ -3268,10 +3269,12 @@ function renderInlineStatText(text: string) {
     }
 
     const token = match[0];
-    if (token.startsWith("**")) {
-      parts.push(<strong key={`${token}-${match.index}`}>{token.slice(2, -2)}</strong>);
+    if (token.startsWith("==")) {
+      parts.push(<mark key={`${token}-${match.index}`}>{renderInlineStatText(token.slice(2, -2))}</mark>);
+    } else if (token.startsWith("**")) {
+      parts.push(<strong key={`${token}-${match.index}`}>{renderInlineStatText(token.slice(2, -2))}</strong>);
     } else {
-      parts.push(<em key={`${token}-${match.index}`}>{token.slice(1, -1)}</em>);
+      parts.push(<em key={`${token}-${match.index}`}>{renderInlineStatText(token.slice(1, -1))}</em>);
     }
 
     lastIndex = match.index + token.length;

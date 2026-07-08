@@ -1166,6 +1166,13 @@ select:focus {
   color: var(--muted);
 }
 
+.stat-block-rendered mark {
+  border-radius: 3px;
+  background: rgba(235, 188, 91, 0.34);
+  color: #ffe7a3;
+  padding: 0 0.18rem;
+}
+
 .stat-block-modal::-webkit-scrollbar,
 .stat-block-editor textarea::-webkit-scrollbar,
 .stat-block-preview::-webkit-scrollbar {
