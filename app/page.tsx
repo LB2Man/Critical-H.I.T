@@ -1126,7 +1126,7 @@ function RoomView({ room, user, onBack }: { room: Room; user: User; onBack: () =
   }
 
   async function handleNext() {
-    if (!isCreator || combatants.length === 0) return;
+    if (combatants.length === 0) return;
     const currentIndex = Math.max(
       combatants.findIndex((combatant) => combatant.id === room.activeCombatantId),
       0,
@@ -1159,7 +1159,7 @@ function RoomView({ room, user, onBack }: { room: Room; user: User; onBack: () =
   }
 
   async function handleBack() {
-    if (!isCreator || combatants.length === 0) return;
+    if (combatants.length === 0) return;
     const currentIndex = Math.max(
       combatants.findIndex((combatant) => combatant.id === room.activeCombatantId),
       0,
@@ -1420,11 +1420,11 @@ function RoomView({ room, user, onBack }: { room: Room; user: User; onBack: () =
       ) : (
         <div className="initiative-tab">
           <div className="tracker-toolbar">
-            <button className="primary-action" onClick={handleBack} disabled={!isCreator}>
+            <button className="primary-action" onClick={handleBack}>
               <ChevronLeft aria-hidden="true" />
               Back
             </button>
-            <button className="primary-action" onClick={handleNext} disabled={!isCreator}>
+            <button className="primary-action" onClick={handleNext}>
               <ChevronRight aria-hidden="true" />
               Next
             </button>
@@ -1478,6 +1478,7 @@ function RoomView({ room, user, onBack }: { room: Room; user: User; onBack: () =
                       active={combatant.id === room.activeCombatantId}
                       canManage={isCreator || combatant.ownerUid === user.uid}
                       canEdit={isCreator || combatant.ownerUid === user.uid}
+                      canEditConditions
                       canDrag={isCreator}
                       currentUserId={user.uid}
                       statBlocks={isCreator ? statBlocks.filter((statBlock) => statBlock.title.trim()) : []}
@@ -3293,6 +3294,7 @@ function CombatantRow({
   active,
   canManage,
   canEdit,
+  canEditConditions,
   canDrag,
   currentUserId,
   statBlocks,
@@ -3307,6 +3309,7 @@ function CombatantRow({
   active: boolean;
   canManage: boolean;
   canEdit: boolean;
+  canEditConditions: boolean;
   canDrag: boolean;
   currentUserId: string;
   statBlocks: StatBlock[];
@@ -3364,7 +3367,7 @@ function CombatantRow({
 
   function addCondition(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!canEdit) return;
+    if (!canEditConditions) return;
 
     const rounds = Number(conditionRounds);
     const hasRounds = Number.isFinite(rounds) && rounds > 0;
@@ -3395,7 +3398,7 @@ function CombatantRow({
   }
 
   function removeCondition(id: string) {
-    if (!canEdit) return;
+    if (!canEditConditions) return;
     onUpdate({ conditions: conditions.filter((condition) => condition.id !== id) });
   }
 
@@ -3530,7 +3533,7 @@ function CombatantRow({
             <button
               className="condition-chip"
               key={condition.id}
-              disabled={!canEdit}
+              disabled={!canEditConditions}
               onClick={() => removeCondition(condition.id)}
               title="Remove condition"
             >
@@ -3542,7 +3545,7 @@ function CombatantRow({
           {conditions.length === 0 && <span className="no-conditions">No conditions</span>}
         </div>
         <div className="add-condition-wrap">
-          {canEdit && (
+          {canEditConditions && (
             <button className="add-condition" onClick={() => setAddingCondition(true)}>
               + Add Condition
             </button>
