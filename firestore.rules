@@ -48,7 +48,7 @@ service cloud.firestore {
 
     function ownedCombatantEditOnly() {
       return request.resource.data.diff(resource.data).changedKeys()
-        .hasOnly(['initiative', 'name', 'hp', 'tempHp', 'maxHp', 'ac', 'conditions', 'concentrationPrompt', 'exhaustionLevel', 'updatedAt']);
+        .hasOnly(['initiative', 'name', 'hp', 'tempHp', 'maxHp', 'ac', 'conditions', 'concentrationPrompt', 'exhaustionLevel', 'faction', 'updatedAt']);
     }
 
 
@@ -60,6 +60,11 @@ service cloud.firestore {
     function combatantConditionsOnly() {
       return request.resource.data.diff(resource.data).changedKeys()
         .hasOnly(['conditions', 'updatedAt']);
+    }
+
+    function combatantFactionOnly() {
+      return request.resource.data.diff(resource.data).changedKeys()
+        .hasOnly(['faction', 'updatedAt']);
     }
 
     function calendarTimeOnly() {
@@ -114,6 +119,7 @@ service cloud.firestore {
         allow update: if isRoomCreator(roomId)
           || (isRoomMember(roomId) && combatantSortOnly())
           || (isRoomMember(roomId) && combatantConditionsOnly())
+          || (isRoomMember(roomId) && combatantFactionOnly())
           || (
             isRoomMember(roomId)
             && resource.data.ownerUid == request.auth.uid

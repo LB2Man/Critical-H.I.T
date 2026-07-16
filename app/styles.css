@@ -530,6 +530,68 @@ select:focus {
   width: fit-content;
 }
 
+.faction-button {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 2px;
+  width: 2.15rem;
+  min-width: 2.15rem;
+  height: 1.35rem;
+  padding: 0.16rem;
+  border: 1px solid rgba(255, 87, 99, 0.42);
+  border-radius: 999px;
+  background: rgba(6, 0, 0, 0.88);
+  cursor: pointer;
+  transition:
+    border-color 160ms ease,
+    box-shadow 160ms ease,
+    transform 160ms ease;
+}
+
+.faction-button:hover,
+.faction-button:focus-visible {
+  border-color: var(--red);
+  box-shadow: 0 0 0.55rem rgba(229, 35, 53, 0.28);
+  outline: none;
+}
+
+.faction-button:active {
+  transform: translateY(1px);
+}
+
+.faction-button-segment {
+  min-width: 0;
+  border-radius: 999px;
+  opacity: 0.42;
+}
+
+.faction-button-segment-enemy {
+  background: #ff4d5b;
+}
+
+.faction-button-segment-neutral {
+  background: #f4eee6;
+}
+
+.faction-button-segment-ally {
+  background: #55df7a;
+}
+
+.faction-button-segment.active {
+  opacity: 1;
+  box-shadow:
+    0 0 0 1px rgba(247, 211, 130, 0.9),
+    0 0 0.45rem rgba(247, 211, 130, 0.45);
+}
+
+.combatant-faction-button {
+  align-self: center;
+}
+
+.picker-row-faction {
+  justify-self: start;
+}
+
 .saved-character-list {
   display: grid;
   gap: 0.65rem;
@@ -537,7 +599,7 @@ select:focus {
 
 .saved-character-row {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto auto 2.6rem;
+  grid-template-columns: minmax(0, 1fr) auto auto auto 2.6rem;
   gap: 0.65rem;
   align-items: center;
   border: 1px solid var(--line);
@@ -565,7 +627,7 @@ select:focus {
 }
 
 .stat-block-picker-row {
-  grid-template-columns: minmax(0, 1fr) auto auto;
+  grid-template-columns: minmax(0, 1fr) auto auto auto;
 }
 
 .calendar-event-modal textarea {
@@ -1602,6 +1664,18 @@ summary {
   font-size: 1.05rem;
 }
 
+.name-input.faction-neutral {
+  color: var(--text);
+}
+
+.name-input.faction-ally {
+  color: #6fea8f;
+}
+
+.name-input.faction-enemy {
+  color: #ff6b76;
+}
+
 .name-input:focus {
   box-shadow: none;
 }
@@ -1617,7 +1691,7 @@ summary {
 
 .name-input-row {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: auto minmax(0, 1fr) auto;
   gap: 0.45rem;
   align-items: center;
 }

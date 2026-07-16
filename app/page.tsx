@@ -62,6 +62,7 @@ import {
 import { auth, db, firebaseReady, googleProvider } from "../lib/firebase";
 import {
   Combatant,
+  CombatantFaction,
   Condition,
   ActiveCondition,
   CalendarEvent,
@@ -83,6 +84,7 @@ import {
 
 type View = "rooms" | "room";
 type RoomTab = "initiative" | "invite" | "statBlocks" | "calendar";
+const FACTION_BUTTON_SEGMENTS: CombatantFaction[] = ["enemy", "neutral", "ally"];
 
 function normalizeCampaignName(name: string) {
   return name.trim().replace(/\s+/g, " ").toLocaleLowerCase();
@@ -90,6 +92,52 @@ function normalizeCampaignName(name: string) {
 
 function normalizeSavedCharacterName(name: string) {
   return name.trim().replace(/\s+/g, " ").toLocaleLowerCase();
+}
+
+function nextFaction(faction: CombatantFaction): CombatantFaction {
+  if (faction === "neutral") {
+    return "enemy";
+  }
+
+  if (faction === "enemy") {
+    return "ally";
+  }
+
+  return "neutral";
+}
+
+function FactionButton({
+  value,
+  onChange,
+  label = "Marker",
+  className = "",
+}: {
+  value: CombatantFaction;
+  onChange: (faction: CombatantFaction) => void;
+  label?: string;
+  className?: string;
+}) {
+  const readableFaction = titleCase(value);
+
+  return (
+    <button
+      className={`faction-button faction-button-${value} ${className}`.trim()}
+      type="button"
+      onClick={() => onChange(nextFaction(value))}
+      title={`${label}: ${readableFaction}. Click to change.`}
+      aria-label={`${label}: ${readableFaction}. Click to change.`}
+    >
+      {FACTION_BUTTON_SEGMENTS.map((faction) => (
+        <span
+          aria-hidden="true"
+          className={`faction-button-segment faction-button-segment-${faction}${
+            faction === value ? " active" : ""
+          }`}
+          key={faction}
+        />
+      ))}
+    </button>
+  );
 }
 
 export default function Home() {
@@ -934,7 +982,7 @@ function RoomView({ room, user, onBack }: { room: Room; user: User; onBack: () =
     setInviteEmail("");
   }
 
-  async function addCombatant() {
+  async function addCombatant(faction: CombatantFaction = "neutral") {
     if (!user.email) return;
     const order = combatants.length ? Math.max(...combatants.map((item) => item.order)) + 1 : 0;
     const isPlayer = !isCreator;
@@ -951,6 +999,7 @@ function RoomView({ room, user, onBack }: { room: Room; user: User; onBack: () =
       ownerUid: isPlayer ? user.uid : "",
       ownerEmail: isPlayer ? user.email : "",
       type: isPlayer ? "player" : "npc",
+      faction,
       order,
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
@@ -989,7 +1038,7 @@ function RoomView({ room, user, onBack }: { room: Room; user: User; onBack: () =
     await deleteDoc(doc(db, "rooms", room.id, "savedCharacters", id));
   }
 
-  async function addSavedCharacterToInitiative(character: SavedCharacter) {
+  async function addSavedCharacterToInitiative(character: SavedCharacter, faction: CombatantFaction = "neutral") {
     if (!user.email || isCreator) return;
     const order = combatants.length ? Math.max(...combatants.map((item) => item.order)) + 1 : 0;
     const hp = Math.max(0, Number(character.hp) || 0);
@@ -1007,6 +1056,7 @@ function RoomView({ room, user, onBack }: { room: Room; user: User; onBack: () =
       ownerUid: user.uid,
       ownerEmail: user.email,
       type: "player",
+      faction,
       order,
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
@@ -1029,6 +1079,7 @@ function RoomView({ room, user, onBack }: { room: Room; user: User; onBack: () =
       title,
       ac: 10,
       hp: 10,
+      faction: "neutral",
       body:
         "# Main Title\n## Section Title\n**Bold text**\n*Italic text with stars*\n_Italic text with underscores_\n==Yellow marker text==\n==**Highlighted bold text**==\n==_Highlighted italic text_==\n---\n**Abilities**\nAdd abilities here.",
       order,
@@ -1038,7 +1089,7 @@ function RoomView({ room, user, onBack }: { room: Room; user: User; onBack: () =
     setActiveStatBlockId(statBlockRef.id);
   }
 
-  async function addStatBlockToInitiative(statBlock: StatBlock) {
+  async function addStatBlockToInitiative(statBlock: StatBlock, faction: CombatantFaction = statBlock.faction ?? "neutral") {
     if (!isCreator) return;
     const order = combatants.length ? Math.max(...combatants.map((item) => item.order)) + 1 : 0;
     const hp = Math.max(0, Number(statBlock.hp) || 10);
@@ -1056,6 +1107,7 @@ function RoomView({ room, user, onBack }: { room: Room; user: User; onBack: () =
       ownerUid: "",
       ownerEmail: "",
       type: "npc",
+      faction,
       order,
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
@@ -1581,8 +1633,8 @@ function SavedCharactersModal({
   onCreate: (character: Omit<SavedCharacter, "id" | "ownerUid" | "ownerEmail">) => void | Promise<void>;
   onUpdate: (id: string, patch: Partial<SavedCharacter>) => void | Promise<void>;
   onDelete: (id: string) => void | Promise<void>;
-  onAddBlank: () => void | Promise<void>;
-  onAddToInitiative: (character: SavedCharacter) => void | Promise<void>;
+  onAddBlank: (faction?: CombatantFaction) => void | Promise<void>;
+  onAddToInitiative: (character: SavedCharacter, faction?: CombatantFaction) => void | Promise<void>;
 }) {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [name, setName] = useState("");
@@ -1590,6 +1642,7 @@ function SavedCharactersModal({
   const [ac, setAc] = useState("10");
   const [error, setError] = useState("");
   const [successMessage, setSuccessMessage] = useState("");
+  const [rowFactions, setRowFactions] = useState<Record<string, CombatantFaction>>({});
   const [deleteCharacter, setDeleteCharacter] = useState<SavedCharacter | null>(null);
   const sortedCharacters = [...characters].sort((a, b) => a.name.localeCompare(b.name));
 
@@ -1647,12 +1700,13 @@ function SavedCharactersModal({
   }
 
   async function addCharacterToInitiative(character: SavedCharacter) {
-    await onAddToInitiative(character);
+    const faction = rowFactions[character.id] ?? "neutral";
+    await onAddToInitiative(character, faction);
     setSuccessMessage(`${character.name} added to initiative.`);
   }
 
   async function addBlankToInitiative() {
-    await onAddBlank();
+    await onAddBlank("neutral");
     setSuccessMessage("Blank character added to initiative.");
   }
 
@@ -1712,6 +1766,11 @@ function SavedCharactersModal({
                     HP {character.hp} | AC {character.ac}
                   </span>
                 </div>
+                <FactionButton
+                  value={rowFactions[character.id] ?? "neutral"}
+                  onChange={(faction) => setRowFactions((current) => ({ ...current, [character.id]: faction }))}
+                  className="picker-row-faction"
+                />
                 <button className="tool-button" onClick={() => addCharacterToInitiative(character)}>
                   <Plus aria-hidden="true" />
                   Add to Initiative
@@ -1771,12 +1830,13 @@ function InitiativeStatBlocksModal({
 }: {
   statBlocks: StatBlock[];
   onClose: () => void;
-  onAddBlank: () => void | Promise<void>;
-  onAddToInitiative: (statBlock: StatBlock) => void | Promise<void>;
+  onAddBlank: (faction?: CombatantFaction) => void | Promise<void>;
+  onAddToInitiative: (statBlock: StatBlock, faction?: CombatantFaction) => void | Promise<void>;
   onEdit: (id: string) => void;
 }) {
   const [search, setSearch] = useState("");
   const [successMessage, setSuccessMessage] = useState("");
+  const [rowFactions, setRowFactions] = useState<Record<string, CombatantFaction>>({});
   const filteredStatBlocks = [...statBlocks]
     .filter((statBlock) => statBlock.title.toLowerCase().includes(search.trim().toLowerCase()))
     .sort((a, b) => a.title.localeCompare(b.title));
@@ -1788,12 +1848,12 @@ function InitiativeStatBlocksModal({
   }, [successMessage]);
 
   async function addBlankToInitiative() {
-    await onAddBlank();
+    await onAddBlank("neutral");
     setSuccessMessage("Blank combatant added to initiative.");
   }
 
   async function addStatBlock(statBlock: StatBlock) {
-    await onAddToInitiative(statBlock);
+    await onAddToInitiative(statBlock, rowFactions[statBlock.id] ?? statBlock.faction ?? "neutral");
     setSuccessMessage(`${statBlock.title || "Name"} added to initiative.`);
   }
 
@@ -1832,6 +1892,11 @@ function InitiativeStatBlocksModal({
                     HP {statBlock.hp ?? 10} | AC {statBlock.ac ?? 10}
                   </span>
                 </div>
+                <FactionButton
+                  value={rowFactions[statBlock.id] ?? statBlock.faction ?? "neutral"}
+                  onChange={(faction) => setRowFactions((current) => ({ ...current, [statBlock.id]: faction }))}
+                  className="picker-row-faction"
+                />
                 <button className="tool-button" onClick={() => addStatBlock(statBlock)}>
                   <Plus aria-hidden="true" />
                   Add to Initiative
@@ -1877,7 +1942,7 @@ function StatBlocksTab({
   onRequestDelete: (id: string) => void;
   onCancelDelete: () => void;
   onDelete: (id: string) => void;
-  onAddToInitiative: (statBlock: StatBlock) => void | Promise<void>;
+  onAddToInitiative: (statBlock: StatBlock, faction?: CombatantFaction) => void | Promise<void>;
   onDragEnd: (event: DragEndEvent) => void;
 }) {
   const activeStatBlock = statBlocks.find((statBlock) => statBlock.id === activeStatBlockId) || null;
@@ -1959,7 +2024,7 @@ function StatBlockCard({
 }: {
   statBlock: StatBlock;
   onOpen: (id: string) => void;
-  onAddToInitiative: (statBlock: StatBlock) => void | Promise<void>;
+  onAddToInitiative: (statBlock: StatBlock, faction?: CombatantFaction) => void | Promise<void>;
   onRequestDelete: (id: string) => void;
 }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
@@ -3242,6 +3307,7 @@ function StatBlockModal({
   const [draftTitle, setDraftTitle] = useState(statBlock.title);
   const [draftAc, setDraftAc] = useState(statBlock.ac ?? 10);
   const [draftHp, setDraftHp] = useState(statBlock.hp ?? 10);
+  const [draftFaction, setDraftFaction] = useState<CombatantFaction>(statBlock.faction ?? "neutral");
   const [draftBody, setDraftBody] = useState(statBlock.body);
   const [editing, setEditing] = useState(initialEditing || (!statBlock.title && !statBlock.body));
   const [confirmDiscard, setConfirmDiscard] = useState(false);
@@ -3256,18 +3322,20 @@ function StatBlockModal({
     setDraftTitle(statBlock.title);
     setDraftAc(statBlock.ac ?? 10);
     setDraftHp(statBlock.hp ?? 10);
+    setDraftFaction(statBlock.faction ?? "neutral");
     setDraftBody(statBlock.body);
     if (statBlockChanged) {
       setEditing(initialEditing || (!statBlock.title && !statBlock.body));
     }
     setConfirmDiscard(false);
     setTitleError("");
-  }, [statBlock.id, statBlock.title, statBlock.ac, statBlock.hp, statBlock.body, initialEditing]);
+  }, [statBlock.id, statBlock.title, statBlock.ac, statBlock.hp, statBlock.faction, statBlock.body, initialEditing]);
 
   const hasUnsavedChanges =
     draftTitle !== statBlock.title ||
     draftAc !== (statBlock.ac ?? 10) ||
     draftHp !== (statBlock.hp ?? 10) ||
+    draftFaction !== (statBlock.faction ?? "neutral") ||
     draftBody !== statBlock.body;
 
   function saveStatBlock() {
@@ -3290,6 +3358,7 @@ function StatBlockModal({
       title: draftTitle.trim(),
       ac: draftAc,
       hp: draftHp,
+      faction: draftFaction,
       body: draftBody,
     });
     setEditing(false);
@@ -3350,6 +3419,7 @@ function StatBlockModal({
                       aria-label="Stat block HP"
                     />
                   </label>
+                  <FactionButton value={draftFaction} onChange={setDraftFaction} />
                 </div>
               </>
             ) : (
@@ -3361,6 +3431,9 @@ function StatBlockModal({
                   </span>
                   <span>
                     <span className="stat-label">HP</span> {draftHp}
+                  </span>
+                  <span>
+                    <span className="stat-label">Marker</span> {titleCase(draftFaction)}
                   </span>
                 </div>
               </>
@@ -3537,6 +3610,7 @@ function CombatantRow({
     transition,
   };
   const conditions = normalizeConditions(combatant.conditions);
+  const faction = combatant.faction ?? "neutral";
   const exhaustionLevel = combatant.exhaustionLevel ?? 0;
   const tempHp = combatant.tempHp ?? 0;
   const concentrationPrompt = combatant.concentrationPrompt ?? null;
@@ -3673,8 +3747,14 @@ function CombatantRow({
       <div className="combatant-main">
         <div className="name-combobox">
           <div className="name-input-row">
+            <FactionButton
+              value={faction}
+              onChange={(nextFaction) => onUpdate({ faction: nextFaction })}
+              label="Mark"
+              className="combatant-faction-button"
+            />
             <input
-              className="name-input"
+              className={`name-input faction-${faction}`}
               value={visibleName}
               placeholder="Name"
               disabled={!canManage}

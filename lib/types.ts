@@ -17,6 +17,7 @@ export const CONDITIONS = [
 export type Condition = (typeof CONDITIONS)[number];
 export type ConditionName = Condition | "custom";
 export type HpVisibility = "hideHpFromInvitees" | "hideAcFromInvitees";
+export type CombatantFaction = "neutral" | "ally" | "enemy";
 
 export type ActiveCondition = {
   id: string;
@@ -58,6 +59,7 @@ export type Combatant = {
   ownerUid: string;
   ownerEmail: string;
   type: "player" | "npc";
+  faction?: CombatantFaction;
   order: number;
 };
 
@@ -76,6 +78,7 @@ export type StatBlock = {
   body: string;
   ac?: number;
   hp?: number;
+  faction?: CombatantFaction;
   order?: number;
 };
 
