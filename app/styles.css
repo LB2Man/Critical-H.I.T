@@ -426,7 +426,15 @@ select:focus {
 }
 
 .stat-block-card-top .icon-button {
+  margin-left: 0;
+}
+
+.stat-block-card-top .icon-button:first-of-type {
   margin-left: auto;
+}
+
+.stat-block-add-button svg {
+  color: var(--red-bright);
 }
 
 .stat-block-card span {
@@ -508,6 +516,20 @@ select:focus {
   grid-column: 1 / -1;
 }
 
+.field-success {
+  margin: 0;
+  border: 1px solid rgba(235, 188, 91, 0.38);
+  border-radius: 6px;
+  background: rgba(109, 75, 20, 0.24);
+  color: var(--gold);
+  padding: 0.55rem 0.7rem;
+  font-size: 0.92rem;
+}
+
+.picker-add-blank-button {
+  width: fit-content;
+}
+
 .saved-character-list {
   display: grid;
   gap: 0.65rem;
@@ -540,6 +562,10 @@ select:focus {
 .saved-character-row span {
   color: var(--muted);
   font-size: 0.9rem;
+}
+
+.stat-block-picker-row {
+  grid-template-columns: minmax(0, 1fr) auto auto;
 }
 
 .calendar-event-modal textarea {

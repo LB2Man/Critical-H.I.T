@@ -831,6 +831,7 @@ function RoomView({ room, user, onBack }: { room: Room; user: User; onBack: () =
   const [inviteEmail, setInviteEmail] = useState("");
   const [activeTab, setActiveTab] = useState<RoomTab>("initiative");
   const [savedCharactersOpen, setSavedCharactersOpen] = useState(false);
+  const [statBlockPickerOpen, setStatBlockPickerOpen] = useState(false);
   const [activeStatBlockId, setActiveStatBlockId] = useState<string | null>(null);
   const [deleteStatBlockId, setDeleteStatBlockId] = useState<string | null>(null);
   const [activeCalendarId, setActiveCalendarId] = useState<string | null>(null);
@@ -1035,6 +1036,37 @@ function RoomView({ room, user, onBack }: { room: Room; user: User; onBack: () =
       updatedAt: serverTimestamp(),
     });
     setActiveStatBlockId(statBlockRef.id);
+  }
+
+  async function addStatBlockToInitiative(statBlock: StatBlock) {
+    if (!isCreator) return;
+    const order = combatants.length ? Math.max(...combatants.map((item) => item.order)) + 1 : 0;
+    const hp = Math.max(0, Number(statBlock.hp) || 10);
+    const ac = Math.max(0, Number(statBlock.ac) || 10);
+
+    const newRef = await addDoc(collection(db, "rooms", room.id, "combatants"), {
+      initiative: 0,
+      name: statBlock.title.trim() || "Name",
+      conditions: [],
+      hp,
+      tempHp: 0,
+      maxHp: hp,
+      ac,
+      exhaustionLevel: 0,
+      ownerUid: "",
+      ownerEmail: "",
+      type: "npc",
+      order,
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    });
+
+    if (!room.activeCombatantId && combatants.length === 0) {
+      await updateDoc(doc(db, "rooms", room.id), {
+        activeCombatantId: newRef.id,
+        updatedAt: serverTimestamp(),
+      });
+    }
   }
 
   async function addCalendar(calendar: Omit<CampaignCalendar, "id" | "order">) {
@@ -1388,6 +1420,7 @@ function RoomView({ room, user, onBack }: { room: Room; user: User; onBack: () =
           onRequestDelete={setDeleteStatBlockId}
           onCancelDelete={() => setDeleteStatBlockId(null)}
           onDelete={removeStatBlock}
+          onAddToInitiative={addStatBlockToInitiative}
           onDragEnd={handleStatBlockDragEnd}
         />
       ) : activeTab === "calendar" ? (
@@ -1432,10 +1465,12 @@ function RoomView({ room, user, onBack }: { room: Room; user: User; onBack: () =
               <SortDesc aria-hidden="true" />
               Sort
             </button>
-            <button className="tool-button" onClick={addCombatant}>
-              <Plus aria-hidden="true" />
-              Add
-            </button>
+            {isCreator && (
+              <button className="tool-button" onClick={() => setStatBlockPickerOpen(true)}>
+                <UserPlus aria-hidden="true" />
+                Stat Blocks
+              </button>
+            )}
             {!isCreator && (
               <button className="tool-button" onClick={() => setSavedCharactersOpen(true)}>
                 <UserPlus aria-hidden="true" />
@@ -1502,7 +1537,28 @@ function RoomView({ room, user, onBack }: { room: Room; user: User; onBack: () =
               onCreate={addSavedCharacter}
               onUpdate={updateSavedCharacter}
               onDelete={removeSavedCharacter}
+              onAddBlank={addCombatant}
               onAddToInitiative={addSavedCharacterToInitiative}
+            />
+          )}
+          {statBlockPickerOpen && isCreator && (
+            <InitiativeStatBlocksModal
+              statBlocks={statBlocks}
+              onClose={() => setStatBlockPickerOpen(false)}
+              onAddBlank={addCombatant}
+              onAddToInitiative={addStatBlockToInitiative}
+              onEdit={(id) => {
+                setStatBlockPickerOpen(false);
+                setActiveStatBlockId(id);
+              }}
+            />
+          )}
+          {activeStatBlockId && isCreator && activeTab === "initiative" && statBlocks.some((statBlock) => statBlock.id === activeStatBlockId) && (
+            <StatBlockModal
+              statBlock={statBlocks.find((statBlock) => statBlock.id === activeStatBlockId)!}
+              statBlocks={statBlocks}
+              onClose={() => setActiveStatBlockId(null)}
+              onUpdate={updateStatBlock}
             />
           )}
         </div>
@@ -1517,6 +1573,7 @@ function SavedCharactersModal({
   onCreate,
   onUpdate,
   onDelete,
+  onAddBlank,
   onAddToInitiative,
 }: {
   characters: SavedCharacter[];
@@ -1524,6 +1581,7 @@ function SavedCharactersModal({
   onCreate: (character: Omit<SavedCharacter, "id" | "ownerUid" | "ownerEmail">) => void | Promise<void>;
   onUpdate: (id: string, patch: Partial<SavedCharacter>) => void | Promise<void>;
   onDelete: (id: string) => void | Promise<void>;
+  onAddBlank: () => void | Promise<void>;
   onAddToInitiative: (character: SavedCharacter) => void | Promise<void>;
 }) {
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -1531,8 +1589,15 @@ function SavedCharactersModal({
   const [hp, setHp] = useState("10");
   const [ac, setAc] = useState("10");
   const [error, setError] = useState("");
+  const [successMessage, setSuccessMessage] = useState("");
   const [deleteCharacter, setDeleteCharacter] = useState<SavedCharacter | null>(null);
   const sortedCharacters = [...characters].sort((a, b) => a.name.localeCompare(b.name));
+
+  useEffect(() => {
+    if (!successMessage) return;
+    const timeoutId = window.setTimeout(() => setSuccessMessage(""), 2000);
+    return () => window.clearTimeout(timeoutId);
+  }, [successMessage]);
 
   function resetForm() {
     setEditingId(null);
@@ -1581,6 +1646,16 @@ function SavedCharactersModal({
     resetForm();
   }
 
+  async function addCharacterToInitiative(character: SavedCharacter) {
+    await onAddToInitiative(character);
+    setSuccessMessage(`${character.name} added to initiative.`);
+  }
+
+  async function addBlankToInitiative() {
+    await onAddBlank();
+    setSuccessMessage("Blank character added to initiative.");
+  }
+
   return (
     <div className="modal-backdrop" role="presentation" onClick={onClose}>
       <div className="saved-characters-modal" role="dialog" aria-modal="true" onClick={(event) => event.stopPropagation()}>
@@ -1590,6 +1665,11 @@ function SavedCharactersModal({
             Close
           </button>
         </div>
+
+        <button className="tool-button picker-add-blank-button" onClick={addBlankToInitiative}>
+          <Plus aria-hidden="true" />
+          Add Blank
+        </button>
 
         <form className="saved-character-form" onSubmit={saveCharacter}>
           <label className="field-stack">
@@ -1632,7 +1712,7 @@ function SavedCharactersModal({
                     HP {character.hp} | AC {character.ac}
                   </span>
                 </div>
-                <button className="tool-button" onClick={() => onAddToInitiative(character)}>
+                <button className="tool-button" onClick={() => addCharacterToInitiative(character)}>
                   <Plus aria-hidden="true" />
                   Add to Initiative
                 </button>
@@ -1652,6 +1732,7 @@ function SavedCharactersModal({
             <div className="empty-state">No saved characters yet.</div>
           )}
         </div>
+        {successMessage && <p className="field-success">{successMessage}</p>}
 
         {deleteCharacter && (
           <div className="modal-backdrop nested-modal" role="presentation" onClick={() => setDeleteCharacter(null)}>
@@ -1681,6 +1762,95 @@ function SavedCharactersModal({
   );
 }
 
+function InitiativeStatBlocksModal({
+  statBlocks,
+  onClose,
+  onAddBlank,
+  onAddToInitiative,
+  onEdit,
+}: {
+  statBlocks: StatBlock[];
+  onClose: () => void;
+  onAddBlank: () => void | Promise<void>;
+  onAddToInitiative: (statBlock: StatBlock) => void | Promise<void>;
+  onEdit: (id: string) => void;
+}) {
+  const [search, setSearch] = useState("");
+  const [successMessage, setSuccessMessage] = useState("");
+  const filteredStatBlocks = [...statBlocks]
+    .filter((statBlock) => statBlock.title.toLowerCase().includes(search.trim().toLowerCase()))
+    .sort((a, b) => a.title.localeCompare(b.title));
+
+  useEffect(() => {
+    if (!successMessage) return;
+    const timeoutId = window.setTimeout(() => setSuccessMessage(""), 2000);
+    return () => window.clearTimeout(timeoutId);
+  }, [successMessage]);
+
+  async function addBlankToInitiative() {
+    await onAddBlank();
+    setSuccessMessage("Blank combatant added to initiative.");
+  }
+
+  async function addStatBlock(statBlock: StatBlock) {
+    await onAddToInitiative(statBlock);
+    setSuccessMessage(`${statBlock.title || "Name"} added to initiative.`);
+  }
+
+  return (
+    <div className="modal-backdrop" role="presentation" onClick={onClose}>
+      <div className="saved-characters-modal" role="dialog" aria-modal="true" onClick={(event) => event.stopPropagation()}>
+        <div className="modal-title-row">
+          <h2>Stat Blocks</h2>
+          <button className="subtle-button" onClick={onClose}>
+            Close
+          </button>
+        </div>
+
+        <button className="tool-button picker-add-blank-button" onClick={addBlankToInitiative}>
+          <Plus aria-hidden="true" />
+          Add Blank
+        </button>
+
+        <label className="field-stack">
+          <span>Search</span>
+          <input
+            value={search}
+            onChange={(event) => setSearch(event.target.value)}
+            placeholder="Search stat blocks"
+            aria-label="Search stat blocks"
+          />
+        </label>
+
+        <div className="saved-character-list">
+          {filteredStatBlocks.length ? (
+            filteredStatBlocks.map((statBlock) => (
+              <div className="saved-character-row stat-block-picker-row" key={statBlock.id}>
+                <div>
+                  <strong>{statBlock.title || "Name"}</strong>
+                  <span>
+                    HP {statBlock.hp ?? 10} | AC {statBlock.ac ?? 10}
+                  </span>
+                </div>
+                <button className="tool-button" onClick={() => addStatBlock(statBlock)}>
+                  <Plus aria-hidden="true" />
+                  Add to Initiative
+                </button>
+                <button className="tool-button" onClick={() => onEdit(statBlock.id)}>
+                  Edit
+                </button>
+              </div>
+            ))
+          ) : (
+            <div className="empty-state">No stat blocks found.</div>
+          )}
+        </div>
+        {successMessage && <p className="field-success">{successMessage}</p>}
+      </div>
+    </div>
+  );
+}
+
 function StatBlocksTab({
   statBlocks,
   activeStatBlockId,
@@ -1693,6 +1863,7 @@ function StatBlocksTab({
   onRequestDelete,
   onCancelDelete,
   onDelete,
+  onAddToInitiative,
   onDragEnd,
 }: {
   statBlocks: StatBlock[];
@@ -1706,10 +1877,23 @@ function StatBlocksTab({
   onRequestDelete: (id: string) => void;
   onCancelDelete: () => void;
   onDelete: (id: string) => void;
+  onAddToInitiative: (statBlock: StatBlock) => void | Promise<void>;
   onDragEnd: (event: DragEndEvent) => void;
 }) {
   const activeStatBlock = statBlocks.find((statBlock) => statBlock.id === activeStatBlockId) || null;
   const deleteStatBlock = statBlocks.find((statBlock) => statBlock.id === deleteStatBlockId) || null;
+  const [successMessage, setSuccessMessage] = useState("");
+
+  useEffect(() => {
+    if (!successMessage) return;
+    const timeoutId = window.setTimeout(() => setSuccessMessage(""), 2000);
+    return () => window.clearTimeout(timeoutId);
+  }, [successMessage]);
+
+  async function addStatBlockCardToInitiative(statBlock: StatBlock) {
+    await onAddToInitiative(statBlock);
+    setSuccessMessage(`${statBlock.title || "Name"} added to initiative.`);
+  }
 
   return (
     <section className="stat-blocks-tab">
@@ -1728,6 +1912,7 @@ function StatBlocksTab({
                 key={statBlock.id}
                 statBlock={statBlock}
                 onOpen={onOpen}
+                onAddToInitiative={addStatBlockCardToInitiative}
                 onRequestDelete={onRequestDelete}
               />
             ))}
@@ -1735,6 +1920,7 @@ function StatBlocksTab({
           </div>
         </SortableContext>
       </DndContext>
+      {successMessage && <p className="field-success">{successMessage}</p>}
 
       {activeStatBlock && (
         <StatBlockModal
@@ -1768,10 +1954,12 @@ function StatBlocksTab({
 function StatBlockCard({
   statBlock,
   onOpen,
+  onAddToInitiative,
   onRequestDelete,
 }: {
   statBlock: StatBlock;
   onOpen: (id: string) => void;
+  onAddToInitiative: (statBlock: StatBlock) => void | Promise<void>;
   onRequestDelete: (id: string) => void;
 }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
@@ -1802,6 +1990,18 @@ function StatBlockCard({
     >
       <div className="stat-block-card-top">
         <MonsterIcon />
+        <button
+          className="icon-button stat-block-add-button"
+          title="Add to initiative"
+          onPointerDown={stopCardGesture}
+          onKeyDown={stopCardGesture}
+          onClick={(event) => {
+            event.stopPropagation();
+            onAddToInitiative(statBlock);
+          }}
+        >
+          <Plus aria-hidden="true" />
+        </button>
         <button
           className="icon-button danger"
           title="Delete stat block"
