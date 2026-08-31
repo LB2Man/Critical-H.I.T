@@ -1210,10 +1210,7 @@ select:focus {
 }
 
 .stat-block-rendered p {
-  white-space: pre-wrap;
-  font-family: Consolas, "Liberation Mono", "Courier New", monospace;
-  font-size: 0.96rem;
-  line-height: 1.35;
+  white-space: break-spaces;
 }
 
 .stat-block-rendered h1,
